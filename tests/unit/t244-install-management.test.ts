@@ -2062,7 +2062,7 @@ describe("t244 Windows and completion release surfaces", () => {
     };
     expect(parsed.jobs.release.needs).toEqual(["validate", "publish"]);
     expect(parsed.jobs.release.permissions).toEqual({ contents: "write" });
-    expect(parsed.jobs.release.environment).toBeUndefined();
+    expect(parsed.jobs.release.environment).toBe("release");
     const release = workflowJob(workflow, "release");
     expect(release).toContain(`GH_TOKEN: \${{ github.token }}`);
     expect(release).toContain('gh release create "$RELEASE_TAG" build/release/*');

@@ -505,6 +505,7 @@ jobs:
   release:
     needs: [validate, publish]
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:

@@ -144,7 +144,9 @@ URL alone does not change the provenance trust root. `AIDLC_GH_BIN` selects an
 explicit GitHub CLI executable for both installers.
 
 Fork releases need no GitHub App or additional repository. The tag workflow
-publishes to the same repository with its short-lived `GITHUB_TOKEN`.
+publishes to the same repository with its short-lived `GITHUB_TOKEN`. Its final
+job uses the `release` environment, which can require reviewer approval before
+publication.
 
 `AIDLC_INSTALL_ROOT` and `AIDLC_BIN_DIR` override the machine and command
 locations. Those paths must be absolute on Unix. The PowerShell installer also

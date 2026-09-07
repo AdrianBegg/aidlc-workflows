@@ -51,7 +51,9 @@ Installers verify `checksums.txt` against that bundle and bind verification to:
 
 ## Publication
 
-The final `release` job receives `contents: write`. It downloads the attested
+The final `release` job runs in the protected `release` environment and receives
+`contents: write`. Configure required reviewers on that environment when
+releases need human approval. After approval, the job downloads the attested
 candidate, rechecks the tag and checksums, and creates the GitHub Release:
 
 ```bash
@@ -65,7 +67,8 @@ The job then compares the local asset names with the asset names returned by
 the GitHub Release API. A missing or extra upload fails the workflow.
 
 All earlier jobs retain `contents: read`. No stored credential receives release
-write access.
+write access, and no job receives publication permission before the environment
+gate.
 
 ## Creating a release
 
