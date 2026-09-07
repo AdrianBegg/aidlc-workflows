@@ -279,19 +279,35 @@ try {
       Select-Object -First 1
     if ($gh) { $ghPath = $gh.Source }
   }
-  if (-not $ghPath -or -not (Test-Path -LiteralPath $ghPath -PathType Leaf)) {
-    Stop-Install -Code 1 -Status 'failed' `
-      -Message 'GitHub CLI is required to verify release provenance' `
-      -Remediation 'install gh, then rerun this installer'
+  $provenanceVerifierAvailable = $false
+  if ($ghPath -and (Test-Path -LiteralPath $ghPath -PathType Leaf)) {
+    try {
+      $ghAttestationHelp = (& $ghPath attestation verify --help 2>&1 | Out-String)
+      $provenanceVerifierAvailable = (
+        $LASTEXITCODE -eq 0 -and
+        $ghAttestationHelp -match '--signer-workflow\b' -and
+        $ghAttestationHelp -match '--source-ref\b' -and
+        $ghAttestationHelp -match '--source-digest\b'
+      )
+    } catch {
+      $provenanceVerifierAvailable = $false
+    }
   }
-  & $ghPath attestation verify $checksumsPath `
-    --bundle $bundle `
-    --repo $releaseRepository `
-    --signer-workflow $releaseWorkflow | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    Stop-Install -Code 4 -Status 'failed' `
-      -Message 'release provenance verification failed' `
-      -Remediation "obtain the release from $releaseRepository"
+  if (-not $provenanceVerifierAvailable -and -not $Quiet -and -not $Json) {
+    [Console]::Error.WriteLine(
+      'WARN GitHub CLI attestation verification is unavailable; continuing with SHA-256 release checksums.'
+    )
+  }
+  if ($provenanceVerifierAvailable) {
+    & $ghPath attestation verify $checksumsPath `
+      --bundle $bundle `
+      --repo $releaseRepository `
+      --signer-workflow $releaseWorkflow | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      Stop-Install -Code 4 -Status 'failed' `
+        -Message 'release provenance verification failed' `
+        -Remediation "obtain the release from $releaseRepository"
+    }
   }
   $manifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
   if ($manifestHash -ne (Get-ExpectedHash -Checksums $checksumsPath -Name 'version.json')) {
@@ -305,16 +321,18 @@ try {
     Stop-Install -Code 4 -Status 'failed' `
       -Message 'version.json has an invalid release source identity'
   }
-  & $ghPath attestation verify $checksumsPath `
-    --bundle $bundle `
-    --repo $releaseRepository `
-    --signer-workflow $releaseWorkflow `
-    --source-ref $manifest.sourceRef `
-    --source-digest $manifest.sourceDigest | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    Stop-Install -Code 4 -Status 'failed' `
-      -Message 'release provenance source verification failed' `
-      -Remediation "obtain the release from $releaseRepository"
+  if ($provenanceVerifierAvailable) {
+    & $ghPath attestation verify $checksumsPath `
+      --bundle $bundle `
+      --repo $releaseRepository `
+      --signer-workflow $releaseWorkflow `
+      --source-ref $manifest.sourceRef `
+      --source-digest $manifest.sourceDigest | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      Stop-Install -Code 4 -Status 'failed' `
+        -Message 'release provenance source verification failed' `
+        -Remediation "obtain the release from $releaseRepository"
+    }
   }
   $verifiedInstaller = Join-Path $temporary 'install.ps1'
   if ($From) {

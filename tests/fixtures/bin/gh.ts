@@ -2,6 +2,16 @@
 import { existsSync, readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
+if (
+  args[0] === "attestation" &&
+  args[1] === "verify" &&
+  args[2] === "--help"
+) {
+  process.stdout.write(
+    "--signer-workflow string\n--source-ref string\n--source-digest string\n",
+  );
+  process.exit(0);
+}
 if (args[0] !== "attestation" || args[1] !== "verify" || !args[2]) {
   process.exit(2);
 }

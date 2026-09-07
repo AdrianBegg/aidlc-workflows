@@ -1401,6 +1401,7 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(script).toContain("$releaseUri.Fragment");
     expect(script).toContain("installer validation failed:");
     expect(script).toContain("attestation verify");
+    expect(script).toContain("--source-digest\\b");
     expect(script).toContain("aidlc-release.intoto.jsonl");
     expect(script).toContain("--signer-workflow");
     expect(script).toContain("$env:AIDLC_RELEASE_REPOSITORY");
@@ -1474,6 +1475,11 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(script).toContain("AIDLC_RELEASE_WORKFLOW");
     expect(script).toContain("AIDLC_GH_BIN");
     expect(script).toContain('"$GH_BIN" attestation verify');
+    expect(script).toContain('"$GH_BIN" attestation verify --help');
+    expect(script).toContain("PROVENANCE_VERIFIER_AVAILABLE");
+    expect(script).not.toContain(
+      "GitHub CLI is required to verify release provenance",
+    );
     expect(script).toContain("is_musl_linux()");
     expect(script).toContain("/lib/ld-musl-*.so.1");
     expect(script).toContain("command -v apk >/dev/null 2>&1");
@@ -1481,6 +1487,99 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(script).toContain('2>"$TMP/apply.err"');
     expect(script).not.toMatch(/^\s*apk add\b/m);
   });
+
+  test("Unix installer does not require GitHub CLI attestation support", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const root = temp("aidlc-t244-old-gh-installer-");
+    const release = fixture(AIDLC_VERSION, { binary: "executable" });
+    const manifestPath = join(release, "version.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+      assets: Array<{
+        name: string;
+        kind: string;
+        sha256: string;
+        bytes: number;
+      }>;
+    };
+    const binary = manifest.assets.find((asset) => asset.kind === "binary");
+    expect(binary).toBeDefined();
+    const binaryPath = join(release, binary!.name);
+    writeFileSync(
+      binaryPath,
+      [
+        "#!/bin/sh",
+        'if [ "$1" = system ] && [ "$2" = lifecycle ] && [ "$3" = install-apply ]; then',
+        '  mkdir -p "$AIDLC_BIN_DIR"',
+        '  cp "$0" "$AIDLC_BIN_DIR/aidlc"',
+        '  chmod 755 "$AIDLC_BIN_DIR/aidlc"',
+        "  exit 0",
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    binary!.sha256 = createHash("sha256")
+      .update(readFileSync(binaryPath))
+      .digest("hex");
+    binary!.bytes = statSync(binaryPath).size;
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const checksumsPath = join(release, "checksums.txt");
+    writeFileSync(
+      checksumsPath,
+      readFileSync(checksumsPath, "utf-8")
+        .replace(
+          new RegExp(`^[a-f0-9]{64}  ${binary!.name}$`, "m"),
+          `${binary!.sha256}  ${binary!.name}`,
+        )
+        .replace(
+          /^[a-f0-9]{64} {2}version\.json$/m,
+          `${createHash("sha256").update(readFileSync(manifestPath)).digest("hex")}  version.json`,
+        ),
+    );
+    writeFileSync(
+      join(release, "aidlc-release.intoto.jsonl"),
+      "bundle deliberately not verified by an old gh\n",
+    );
+    const oldGh = join(root, "gh");
+    writeFileSync(
+      oldGh,
+      [
+        "#!/bin/sh",
+        'if [ "$1" = attestation ] && [ "$2" = verify ] && [ "$3" = --help ]; then',
+        "  printf '%s\\n' 'usage: gh attestation verify [flags]'",
+        "  exit 0",
+        "fi",
+        "exit 91",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const home = join(root, "home");
+    const bin = join(root, "bin");
+    mkdirSync(home, { recursive: true });
+    const result = spawnSync("sh", [
+      INSTALL_SH,
+      "--from",
+      release,
+      "--offline",
+      "--quiet",
+    ], {
+      cwd: root,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: home,
+        AIDLC_GH_BIN: oldGh,
+        AIDLC_INSTALL_ROOT: join(root, "install"),
+        AIDLC_BIN_DIR: bin,
+      },
+    });
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain(`installed AI-DLC ${AIDLC_VERSION}`);
+    expect(result.stderr).toBe("");
+    expect(existsSync(join(bin, "aidlc"))).toBe(true);
+  }, 60_000);
 
   test("Unix installer turns Alpine musl loader failures into the canonical remediation", () => {
     if (process.platform !== "linux" || process.getuid?.() === 0) return;
@@ -1816,6 +1915,8 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(windows).toContain("$Remaining.Count -ne 13");
     expect(windows).toContain("$Remaining[0] -ne 'attestation'");
     expect(windows).toContain("$Remaining[1] -ne 'verify'");
+    expect(windows).toContain("$Remaining[2] -eq '--help'");
+    expect(windows).toContain("'--source-digest string'");
     expect(windows).toContain(
       "[IO.Path]::GetFileName($subject) -ne 'checksums.txt'",
     );
@@ -1873,6 +1974,8 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(unix).toContain("aidlc-lifecycle-provenance-fixture");
     expect(unix).toContain('AIDLC_GH_BIN="$gh_bin"');
     expect(unix).toContain('[ "$#" -eq 9 ] || [ "$#" -eq 13 ]');
+    expect(unix).toContain('[ "$3" = --help ]');
+    expect(unix).toContain("'--source-digest string'");
     expect(unix).toContain('[ "$4" = --bundle ] || exit 2');
     expect(unix).toMatch(
       /\[ "\$5" = "\$\{3%\/checksums\.txt\}\/aidlc-release\.intoto\.jsonl" \] \|\| exit 2/,

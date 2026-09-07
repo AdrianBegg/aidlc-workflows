@@ -42,12 +42,18 @@ after the build and lifecycle jobs pass. GitHub generates build provenance for
 the staged assets. The exported provenance bundle is included as
 `aidlc-release.intoto.jsonl`.
 
-Installers verify `checksums.txt` against that bundle and bind verification to:
+When a compatible GitHub CLI is available, installers verify `checksums.txt`
+against that bundle and bind verification to:
 
 - `awslabs/aidlc-workflows`;
 - `.github/workflows/release.yml`;
 - the release tag;
 - the exact source commit from `version.json`.
+
+Missing or older GitHub CLI versions do not block installation. In that mode,
+online transport remains HTTPS-only, and source identity validation plus
+SHA-256 checks remain mandatory, but the client does not authenticate the
+Sigstore bundle.
 
 ## Publication
 

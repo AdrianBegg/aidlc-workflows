@@ -5,6 +5,7 @@ RELEASE_REPOSITORY=${AIDLC_RELEASE_REPOSITORY:-awslabs/aidlc-workflows}
 BASE_URL=${AIDLC_RELEASE_BASE_URL:-https://github.com/$RELEASE_REPOSITORY/releases}
 RELEASE_WORKFLOW=${AIDLC_RELEASE_WORKFLOW:-$RELEASE_REPOSITORY/.github/workflows/release.yml}
 GH_BIN=${AIDLC_GH_BIN:-}
+PROVENANCE_VERIFIER_AVAILABLE=0
 VERSION=
 FROM=
 OFFLINE=0
@@ -351,17 +352,27 @@ requested_version=$VERSION
 if [ -z "$GH_BIN" ]; then
   GH_BIN=$(command -v gh 2>/dev/null || true)
 fi
-if [ -z "$GH_BIN" ] || [ ! -x "$GH_BIN" ]; then
-  fail 1 failed "GitHub CLI is required to verify release provenance" \
-    "install gh, then rerun this installer"
+gh_attestation_help=
+if [ -n "$GH_BIN" ] && [ -x "$GH_BIN" ]; then
+  gh_attestation_help=$("$GH_BIN" attestation verify --help 2>/dev/null || true)
 fi
-"$GH_BIN" attestation verify "$TMP/checksums.txt" \
-  --bundle "$TMP/aidlc-release.intoto.jsonl" \
-  --repo "$RELEASE_REPOSITORY" \
-  --signer-workflow "$RELEASE_WORKFLOW" \
-  >/dev/null 2>"$TMP/provenance.err" ||
-  fail 4 failed "release provenance verification failed" \
-    "obtain the release from $RELEASE_REPOSITORY"
+if printf '%s\n' "$gh_attestation_help" | grep -Fq -- "--signer-workflow" &&
+  printf '%s\n' "$gh_attestation_help" | grep -Fq -- "--source-ref" &&
+  printf '%s\n' "$gh_attestation_help" | grep -Fq -- "--source-digest"; then
+  PROVENANCE_VERIFIER_AVAILABLE=1
+elif [ "$MODE" = "human" ]; then
+  printf '%s\n' \
+    "WARN GitHub CLI attestation verification is unavailable; continuing with SHA-256 release checksums." >&2
+fi
+if [ "$PROVENANCE_VERIFIER_AVAILABLE" -eq 1 ]; then
+  "$GH_BIN" attestation verify "$TMP/checksums.txt" \
+    --bundle "$TMP/aidlc-release.intoto.jsonl" \
+    --repo "$RELEASE_REPOSITORY" \
+    --signer-workflow "$RELEASE_WORKFLOW" \
+    >/dev/null 2>"$TMP/provenance.err" ||
+    fail 4 failed "release provenance verification failed" \
+      "obtain the release from $RELEASE_REPOSITORY"
+fi
 
 expected_manifest=$(sed -n 's/^\([a-f0-9]\{64\}\)  version\.json$/\1/p' "$TMP/checksums.txt")
 [ -n "$expected_manifest" ] || fail 4 failed "No checksum for version.json."
@@ -379,15 +390,17 @@ source_digest=$(sed -n 's/.*"sourceDigest":[[:space:]]*"\([a-f0-9]*\)".*/\1/p' "
   fail 4 failed "version.json has an invalid release source ref"
 printf '%s\n' "$source_digest" | grep -Eq '^[a-f0-9]{40}$' ||
   fail 4 failed "version.json has an invalid release source digest"
-"$GH_BIN" attestation verify "$TMP/checksums.txt" \
-  --bundle "$TMP/aidlc-release.intoto.jsonl" \
-  --repo "$RELEASE_REPOSITORY" \
-  --signer-workflow "$RELEASE_WORKFLOW" \
-  --source-ref "$source_ref" \
-  --source-digest "$source_digest" \
-  >/dev/null 2>"$TMP/provenance.err" ||
-  fail 4 failed "release provenance source verification failed" \
-    "obtain the release from $RELEASE_REPOSITORY"
+if [ "$PROVENANCE_VERIFIER_AVAILABLE" -eq 1 ]; then
+  "$GH_BIN" attestation verify "$TMP/checksums.txt" \
+    --bundle "$TMP/aidlc-release.intoto.jsonl" \
+    --repo "$RELEASE_REPOSITORY" \
+    --signer-workflow "$RELEASE_WORKFLOW" \
+    --source-ref "$source_ref" \
+    --source-digest "$source_digest" \
+    >/dev/null 2>"$TMP/provenance.err" ||
+    fail 4 failed "release provenance source verification failed" \
+      "obtain the release from $RELEASE_REPOSITORY"
+fi
 
 if [ -n "$requested_version" ] && [ "$requested_version" != "$candidate_version" ]; then
   fail 4 failed "release endpoint returned $candidate_version, not requested $requested_version"

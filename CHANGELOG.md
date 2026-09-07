@@ -8,6 +8,7 @@ Bind native releases to the version tag that triggered them and include that ver
 * Pushing a `vX.Y.Z` tag now starts the release workflow. The workflow rejects a tag that does not match `AIDLC_VERSION`, does not point to its checked-out commit, or does not belong to `main`.
 * Release manifests and provenance now bind to `refs/tags/vX.Y.Z` instead of `refs/heads/main`.
 * The runtime asset is now named `aidlc-runtime-X.Y.Z.tar.gz`, and the README documents how to use it as the release equivalent of a generated `dist/<harness>/` directory.
+* GitHub CLI is optional for native installs. Compatible versions verify the signed release attestation; missing or older versions continue with source identity checks and SHA-256 verification, while online downloads remain HTTPS-only.
 
 ## [2.7.1] - 2026-09-01
 

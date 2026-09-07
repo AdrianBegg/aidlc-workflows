@@ -2178,6 +2178,44 @@ describe("t243 release lifecycle", () => {
     expect(swapped.status).toBe(1);
   });
 
+  test("local release acquisition accepts a GitHub CLI without required attestation flags", async () => {
+    const release = fixtureReleaseBytes();
+    writeFileSync(join(release, "aidlc-release.intoto.jsonl"), "unverified fixture\n");
+    const oldGh = join(temp("aidlc-t243-old-gh-"), "gh");
+    writeFileSync(
+      oldGh,
+      [
+        "#!/bin/sh",
+        'if [ "$1" = attestation ] && [ "$2" = verify ] && [ "$3" = --help ]; then',
+        "  printf '%s\\n' 'usage: gh attestation verify [flags]'",
+        "  exit 0",
+        "fi",
+        "exit 91",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const previousGh = process.env.AIDLC_GH_BIN;
+    process.env.AIDLC_GH_BIN = oldGh;
+    try {
+      const acquired = await acquireRelease({ from: release });
+      expect(acquired.manifest.version).toBe(AIDLC_VERSION);
+
+      const manifestPath = join(release, "version.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+        date: string;
+      };
+      manifest.date = "2026-09-08";
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      await expect(acquireRelease({ from: release })).rejects.toThrow(
+        "version.json: checksum mismatch",
+      );
+    } finally {
+      if (previousGh === undefined) delete process.env.AIDLC_GH_BIN;
+      else process.env.AIDLC_GH_BIN = previousGh;
+    }
+  });
+
   test("release manifests reject retired per-distribution data assets", () => {
     const release = fixtureReleaseBytes();
     const manifestPath = join(release, "version.json");

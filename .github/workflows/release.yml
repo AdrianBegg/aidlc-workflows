@@ -246,6 +246,19 @@ jobs:
             ''
           }
           if (
+            $Remaining.Count -eq 3 -and
+            $Remaining[0] -eq 'attestation' -and
+            $Remaining[1] -eq 'verify' -and
+            $Remaining[2] -eq '--help'
+          ) {
+            @(
+              '--signer-workflow string'
+              '--source-ref string'
+              '--source-digest string'
+            )
+            exit 0
+          }
+          if (
             ($Remaining.Count -ne 9 -and $Remaining.Count -ne 13) -or
             $Remaining[0] -ne 'attestation' -or
             $Remaining[1] -ne 'verify' -or
@@ -382,6 +395,14 @@ jobs:
           fi
           cat >"$gh_bin" <<'AIDLC_GH_FIXTURE'
           #!/bin/sh
+          if [ "$#" -eq 3 ] && [ "$1" = attestation ] &&
+            [ "$2" = verify ] && [ "$3" = --help ]; then
+            printf '%s\n' \
+              '--signer-workflow string' \
+              '--source-ref string' \
+              '--source-digest string'
+            exit 0
+          fi
           { [ "$#" -eq 9 ] || [ "$#" -eq 13 ]; } || exit 2
           [ "$1" = attestation ] || exit 2
           [ "$2" = verify ] || exit 2

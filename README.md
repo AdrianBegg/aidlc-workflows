@@ -96,7 +96,10 @@ This release works better with `Claude Opus 4.8`. We are sharpening it for previ
 
 The native installer is the recommended path. It installs one native
 `aidlc` command plus every harness runtime; Bun and Node.js are not required.
-The authenticated bootstrap requires GitHub CLI (`gh`).
+GitHub CLI (`gh`) is optional. When the installed version supports the required
+attestation flags, the installer also verifies release provenance; otherwise it
+continues with mandatory SHA-256 checksums, and online downloads remain
+HTTPS-only.
 
 > [!IMPORTANT]
 > Native release assets (`install.sh`, `install.ps1`,
@@ -110,18 +113,17 @@ The authenticated bootstrap requires GitHub CLI (`gh`).
 
 ```bash
 tmp="$(mktemp -d)"
-tag="$(gh release view --repo awslabs/aidlc-workflows --json tagName --jq .tagName)"
-gh release download "$tag" --repo awslabs/aidlc-workflows --dir "$tmp" \
-  --pattern install.sh --pattern aidlc-release.intoto.jsonl
-gh attestation verify "$tmp/install.sh" \
-  --bundle "$tmp/aidlc-release.intoto.jsonl" \
-  --repo awslabs/aidlc-workflows \
-  --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref "refs/tags/$tag"
-sh "$tmp/install.sh" --version "${tag#v}"
+curl -fsSL \
+  https://github.com/awslabs/aidlc-workflows/releases/latest/download/install.sh \
+  -o "$tmp/install.sh"
+sh "$tmp/install.sh"
 rm -rf "$tmp"
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+For a bootstrap that authenticates `install.sh` before execution, use the
+optional GitHub CLI procedure in
+[Install and Lifecycle](docs/guide/18-install-and-lifecycle.md#release-authentication).
 
 Windows PowerShell uses the matching `install.ps1` asset; see
 [Install and Lifecycle](docs/guide/18-install-and-lifecycle.md#windows-powershell).

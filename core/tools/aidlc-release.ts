@@ -137,7 +137,28 @@ export function verifyReleaseProvenance(
   }
   assertMetadataSize(bundle, PROVENANCE_BUNDLE);
   const trust = releaseTrust();
-  const gh = process.env.AIDLC_GH_BIN?.trim() || "gh";
+  const configuredGh = process.env.AIDLC_GH_BIN?.trim();
+  const gh = configuredGh || "gh";
+  let capabilityAvailable = false;
+  try {
+    const capability = Bun.spawnSync([gh, "attestation", "verify", "--help"], {
+      env: { ...process.env },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const help = [
+      Buffer.from(capability.stdout ?? new Uint8Array()).toString("utf-8"),
+      Buffer.from(capability.stderr ?? new Uint8Array()).toString("utf-8"),
+    ].join("\n");
+    capabilityAvailable = capability.exitCode === 0 &&
+      ["--signer-workflow", "--source-ref", "--source-digest"].every((flag) =>
+        help.includes(flag)
+      );
+  } catch {
+    return;
+  }
+  if (!capabilityAvailable) return;
   const result = Bun.spawnSync([
     gh,
     "attestation",
@@ -165,7 +186,7 @@ export function verifyReleaseProvenance(
     throw new Error(
       `release provenance verification failed${
         stderr ? `: ${stderr.split(/\r?\n/)[0]}` : ""
-      }; install GitHub CLI and verify the release bundle`,
+      }`,
     );
   }
 }
