@@ -69,7 +69,7 @@ must target an installed project harness. Any failed gate fails the build.
 
 After the target binaries are present, `bun scripts/package-release.ts`
 regenerates and verifies the local projections, packages `dist-release/` into
-the versioned `aidlc-runtime.tar.gz`, and emits `version.json`, `checksums.txt`,
+the versioned `aidlc-runtime-X.Y.Z.tar.gz`, and emits `version.json`, `checksums.txt`,
 `install.sh`, and `install.ps1`. The per-target `runtime/` directories are
 smoke-gate staging; release data archives are rebuilt from the freshly
 generated native projections, not copied from those sidecars.

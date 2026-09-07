@@ -9,7 +9,7 @@ script is verified before execution.
 This chapter describes the native install lifecycle available in this release.
 The planned `aidlc setup` experience, npm package, and package-manager formulas
 are not available yet. Manual-copy users take the versioned runtime from
-`aidlc-runtime.tar.gz`; framework developers may separately generate the
+`aidlc-runtime-X.Y.Z.tar.gz`; framework developers may separately generate the
 Bun-invoking `dist/` projection from source.
 
 ## Install
@@ -53,8 +53,8 @@ gh attestation verify "$tmp/install.sh" \
   --bundle "$tmp/aidlc-release.intoto.jsonl" \
   --repo awslabs/aidlc-workflows \
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref refs/heads/main
-sh "$tmp/install.sh"
+  --source-ref "refs/tags/$tag"
+sh "$tmp/install.sh" --version "${tag#v}"
 rm -rf "$tmp"
 ```
 
@@ -69,8 +69,8 @@ gh attestation verify "$tmp/install.sh" \
   --bundle "$tmp/aidlc-release.intoto.jsonl" \
   --repo awslabs/aidlc-workflows \
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref refs/heads/main
-sh "$tmp/install.sh"
+  --source-ref "refs/tags/$tag"
+sh "$tmp/install.sh" --version "${tag#v}"
 rm -rf "$tmp"
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -99,8 +99,8 @@ gh attestation verify (Join-Path $download install.ps1) `
   --bundle (Join-Path $download aidlc-release.intoto.jsonl) `
   --repo awslabs/aidlc-workflows `
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml `
-  --source-ref refs/heads/main
-& (Join-Path $download install.ps1)
+  --source-ref "refs/tags/$tag"
+& (Join-Path $download install.ps1) -Version ($tag -replace '^v', '')
 Remove-Item -Recurse -Force $download
 ```
 
@@ -168,13 +168,13 @@ The installer:
 1. Verifies the installer script against the release's Sigstore bundle before execution.
 2. Downloads or reads `version.json`, `checksums.txt`, and
    `aidlc-release.intoto.jsonl`.
-3. Verifies the `checksums.txt` attestation against the repository,
-   signer workflow, and `refs/heads/main` before trusting any checksum.
+3. Verifies the `checksums.txt` attestation against the repository and signer
+   workflow before trusting any checksum.
 4. Verifies the `version.json` SHA-256, reads its strict version and source
    identity, and rejects an explicit version mismatch before downloading or
    executing a release binary.
-5. Re-verifies the attestation against the authenticated `sourceDigest` on
-   source `main`.
+5. Requires `sourceRef` to equal `refs/tags/v<version>` and re-verifies the
+   attestation against that tag and the authenticated `sourceDigest`.
 6. Verifies the selected binary and harness archives by SHA-256 and declared
    byte length.
 7. Lets the verified binary validate and transactionally install the release.
@@ -742,7 +742,7 @@ gh attestation verify "$tmp/install.sh" \
   --bundle "$tmp/aidlc-release.intoto.jsonl" \
   --repo awslabs/aidlc-workflows \
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref refs/heads/main
+  --source-ref "refs/tags/$tag"
 sh "$tmp/install.sh" --version "$version" --quiet --yes
 rm -rf "$tmp"
 aidlc config --pin "$version" --project-dir "$PWD" --quiet
@@ -902,7 +902,7 @@ continuation before doing other work.
 
 ## Copy Channel
 
-The supported manual-copy payload is the versioned `aidlc-runtime.tar.gz`
+The supported manual-copy payload is the versioned `aidlc-runtime-X.Y.Z.tar.gz`
 release asset. Download one exact release, extract it, and copy the complete
 `runtime/<harness>/` root so the harness tree, `aidlc/` workspace shell, and
 project-root files stay together:
@@ -910,20 +910,21 @@ project-root files stay together:
 ```bash
 tag=vX.Y.Z
 tmp="$(mktemp -d)"
+runtime_asset="aidlc-runtime-${tag#v}.tar.gz"
 publication_repo="${AIDLC_PUBLICATION_REPOSITORY:-awslabs/aidlc-workflows-releases}"
 source_repo="${AIDLC_RELEASE_REPOSITORY:-awslabs/aidlc-workflows}"
 release_workflow="${AIDLC_RELEASE_WORKFLOW:-$source_repo/.github/workflows/release.yml}"
 gh release download "$tag" --repo "$publication_repo" --dir "$tmp" \
-  --pattern aidlc-runtime.tar.gz \
+  --pattern "$runtime_asset" \
   --pattern checksums.txt \
   --pattern aidlc-release.intoto.jsonl
 gh attestation verify "$tmp/checksums.txt" \
   --bundle "$tmp/aidlc-release.intoto.jsonl" \
   --repo "$source_repo" \
   --signer-workflow "$release_workflow" \
-  --source-ref refs/heads/main
-(cd "$tmp" && grep '  aidlc-runtime.tar.gz$' checksums.txt | sha256sum -c -)
-tar -xzf "$tmp/aidlc-runtime.tar.gz" -C "$tmp"
+  --source-ref "refs/tags/$tag"
+(cd "$tmp" && grep "  $runtime_asset\$" checksums.txt | sha256sum -c -)
+tar -xzf "$tmp/$runtime_asset" -C "$tmp"
 RUNTIME_ROOT="$tmp/runtime"
 cp -R "$RUNTIME_ROOT/claude/." your-project/
 ```

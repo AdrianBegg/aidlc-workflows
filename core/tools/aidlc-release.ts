@@ -37,6 +37,10 @@ export type ReleaseManifest = {
   assets: ReleaseAsset[];
 };
 
+export function releaseRuntimeAsset(version: string): string {
+  return `aidlc-runtime-${requireVersion(version)}.tar.gz`;
+}
+
 export class ReleaseUnavailableError extends Error {
   constructor(message: string) {
     super(message);
@@ -185,7 +189,7 @@ export function readReleaseManifest(directory: string): ReleaseManifest {
   if (
     hasSourceRef &&
     (
-      manifest.sourceRef !== "refs/heads/main" ||
+      manifest.sourceRef !== `refs/tags/v${manifest.version}` ||
       !/^[a-f0-9]{40}$/.test(manifest.sourceDigest ?? "")
     )
   ) {
@@ -237,7 +241,7 @@ export function readReleaseManifest(directory: string): ReleaseManifest {
       !verificationValid ||
       (asset.kind === "binary" &&
         (!asset.target || asset.name !== `aidlc-${asset.target}${asset.target.startsWith("windows-") ? ".exe" : ""}`)) ||
-      (asset.kind === "runtime" && asset.name !== "aidlc-runtime.tar.gz") ||
+      (asset.kind === "runtime" && asset.name !== releaseRuntimeAsset(manifest.version)) ||
       (asset.kind === "installer" &&
         asset.name !== "install.sh" &&
         asset.name !== "install.ps1")
@@ -550,7 +554,7 @@ export async function fetchReleaseMetadata(options: {
 export async function acquireRelease(options: {
   version?: string;
   from?: string;
-  names?: readonly string[];
+  names?: readonly string[] | ((manifest: ReleaseManifest) => readonly string[]);
   offline?: boolean;
   baseUrl?: string;
   caBundle?: string;
@@ -559,13 +563,14 @@ export async function acquireRelease(options: {
   if (options.from) {
     const directory = isAbsolute(options.from) ? options.from : resolve(process.cwd(), options.from);
     const manifest = readReleaseManifest(directory);
+    const names = typeof options.names === "function" ? options.names(manifest) : options.names;
     verifyReleaseProvenance(directory, {
       ...manifest,
       sourceDigest: undefined,
     });
     verifiedChecksums(directory);
     if (manifest.sourceDigest) verifyReleaseProvenance(directory, manifest);
-    verifyReleaseDirectory(directory, options.names, Boolean(options.names?.length));
+    verifyReleaseDirectory(directory, names, Boolean(names?.length));
     if (options.version && manifest.version !== options.version) {
       throw new Error(`local release is ${manifest.version}, not requested ${options.version}`);
     }
@@ -590,10 +595,11 @@ export async function acquireRelease(options: {
   try {
     const releasedChecksums = verifiedChecksums(temporary);
     const manifest = metadata.manifest;
-    const selected = options.names?.length
-      ? manifest.assets.filter((asset) => options.names?.includes(asset.name))
+    const names = typeof options.names === "function" ? options.names(manifest) : options.names;
+    const selected = names?.length
+      ? manifest.assets.filter((asset) => names.includes(asset.name))
       : manifest.assets;
-    const missing = (options.names ?? []).filter((name) => !selected.some((asset) => asset.name === name));
+    const missing = (names ?? []).filter((name) => !selected.some((asset) => asset.name === name));
     if (missing.length > 0) {
       throw new ReleaseUnavailableError(`release does not provide: ${missing.join(", ")}`);
     }
@@ -624,7 +630,7 @@ export async function acquireRelease(options: {
         ].join("\n")
       }\n`,
     );
-    verifyReleaseDirectory(temporary, options.names);
+    verifyReleaseDirectory(temporary, names);
     return { directory: temporary, manifest: subset, cleanup: temporary };
   } catch (error) {
     rmSync(temporary, { recursive: true, force: true });

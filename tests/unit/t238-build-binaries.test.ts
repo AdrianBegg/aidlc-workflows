@@ -318,7 +318,7 @@ describe("t238 build-binaries release builder", () => {
       mode: "full-runtime",
     }));
     expect(releaseManifest.assets.filter((asset) => asset.kind === "runtime")).toEqual([
-      expect.objectContaining({ name: "aidlc-runtime.tar.gz" }),
+      expect.objectContaining({ name: `aidlc-runtime-${AIDLC_VERSION}.tar.gz` }),
     ]);
     expect(releaseManifest.assets.some((asset) => asset.kind === "data")).toBe(false);
     writeFileSync(

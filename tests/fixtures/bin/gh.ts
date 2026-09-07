@@ -28,8 +28,8 @@ if (
   repository !== expectedRepository ||
   signerWorkflow !== expectedWorkflow ||
   (
-    sourceRef !== "refs/heads/main" &&
-    !sourceRef?.startsWith("refs/tags/v")
+    sourceRef !== undefined &&
+    !sourceRef.startsWith("refs/tags/v")
   ) ||
   (sourceDigest !== undefined && !/^[a-f0-9]{40}$/.test(sourceDigest))
 ) {

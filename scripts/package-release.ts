@@ -20,7 +20,7 @@ import { digest, type ReleaseAsset, type ReleaseManifest } from "../core/tools/a
 import { AIDLC_VERSION } from "../core/tools/aidlc-version.ts";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const RELEASE_SOURCE_REF = "refs/heads/main";
+const RELEASE_SOURCE_REF = `refs/tags/v${AIDLC_VERSION}`;
 
 function valueAfter(argv: string[], flag: string): string | undefined {
   const index = argv.indexOf(flag);
@@ -276,7 +276,7 @@ function build(argv: string[]): void {
       }
     }
   }
-  const runtimeName = "aidlc-runtime.tar.gz";
+  const runtimeName = `aidlc-runtime-${AIDLC_VERSION}.tar.gz`;
   const runtimePath = join(output, runtimeName);
   writeFileSync(runtimePath, createTarGz(runtimeEntries));
   assets.push({

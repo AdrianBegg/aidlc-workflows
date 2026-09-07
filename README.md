@@ -15,7 +15,7 @@ A native implementation of the **AI-DLC methodology** (AI-Driven Development Lif
 
 The methodology lives once, in a harness-neutral `core/`; each harness adds a thin surface that decides how it shows up on that harness. So you edit the methodology in one place, and every harness distribution is generated from it — no harness gets special treatment. (See [Repository layout](#repository-layout) for how the pieces fit together.)
 
-![version](https://img.shields.io/badge/version-2.7.1-blue)
+![version](https://img.shields.io/badge/version-2.7.2-blue)
 ![license](https://img.shields.io/badge/license-MIT--0-green)
 ![Kiro IDE](https://img.shields.io/badge/harness-Kiro%20IDE-orange)
 ![Kiro CLI](https://img.shields.io/badge/harness-Kiro%20CLI-orange)
@@ -80,7 +80,7 @@ The deterministic engine — state machine, audit log, and the referee that coor
 > reports the prerequisite command when it detects the missing loader
 > dependencies; it never installs system packages.
 > Manual-copy users can take `runtime/<harness>/` from the versioned
-> `aidlc-runtime.tar.gz` release asset; those trees use the matching native
+> `aidlc-runtime-X.Y.Z.tar.gz` release asset; those trees use the matching native
 > `aidlc` command. Only source-generated local `dist/` projections require Bun.
 
 > [!NOTE]
@@ -99,7 +99,8 @@ The native installer is the recommended path. It installs one native
 The authenticated bootstrap requires GitHub CLI (`gh`).
 
 > [!IMPORTANT]
-> Native release assets (`install.sh`, `install.ps1`, `aidlc-runtime.tar.gz`)
+> Native release assets (`install.sh`, `install.ps1`,
+> `aidlc-runtime-X.Y.Z.tar.gz`)
 > ship with the first native release, which follows the release-prep change
 > that finalizes this line. Until a release carries those assets, install from
 > a source checkout instead: clone the repository, run
@@ -116,8 +117,8 @@ gh attestation verify "$tmp/install.sh" \
   --bundle "$tmp/aidlc-release.intoto.jsonl" \
   --repo awslabs/aidlc-workflows \
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref refs/heads/main
-sh "$tmp/install.sh"
+  --source-ref "refs/tags/$tag"
+sh "$tmp/install.sh" --version "${tag#v}"
 rm -rf "$tmp"
 export PATH="$HOME/.local/bin:$PATH"
 ```
@@ -344,15 +345,17 @@ Run `/aidlc --doctor` to verify, then invoke the orchestrator with `/aidlc` foll
 
 ### Copy channel
 
-For a manual directory copy, use the versioned runtime release asset rather
-than repository-generated files:
+For a manual copy equivalent to a generated `dist/<harness>/` directory,
+download the runtime archive for the release version. Do not download the
+repository's generated build directories:
 
 ```bash
 tmp="$(mktemp -d)"
 tag=vX.Y.Z
+runtime_asset="aidlc-runtime-${tag#v}.tar.gz"
 gh release download "$tag" --repo awslabs/aidlc-workflows-releases \
-  --pattern aidlc-runtime.tar.gz --dir "$tmp"
-tar -xzf "$tmp/aidlc-runtime.tar.gz" -C "$tmp"
+  --pattern "$runtime_asset" --dir "$tmp"
+tar -xzf "$tmp/$runtime_asset" -C "$tmp"
 cp -R "$tmp/runtime/<harness>/." /absolute/path/to/your-project/
 ```
 
@@ -424,7 +427,7 @@ aidlc-claude/
 > `core/` is what AI-DLC **is**. `harness/` is how each harness **speaks**.
 > `dist/` and `dist-release/` are disposable local build outputs. Release users
 > install the native assets or copy `runtime/<harness>/` from
-> `aidlc-runtime.tar.gz`.
+> `aidlc-runtime-X.Y.Z.tar.gz`.
 
 ## Build / regenerate the harnesses
 

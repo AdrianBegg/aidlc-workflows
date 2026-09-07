@@ -5,7 +5,10 @@ import {
   statSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { verifyReleaseDirectory } from "../core/tools/aidlc-release.ts";
+import {
+  releaseRuntimeAsset,
+  verifyReleaseDirectory,
+} from "../core/tools/aidlc-release.ts";
 
 const RELEASE_DISTRIBUTIONS = [
   "claude",
@@ -17,21 +20,23 @@ const RELEASE_DISTRIBUTIONS = [
   "opencode",
 ] as const;
 
-const RELEASE_ASSETS = new Map<string, {
+function releaseAssets(version: string): Map<string, {
   kind: "binary" | "runtime" | "installer";
   target?: string;
-}>([
-  ["aidlc-darwin-arm64", { kind: "binary", target: "darwin-arm64" }],
-  ["aidlc-darwin-x64", { kind: "binary", target: "darwin-x64" }],
-  ["aidlc-linux-arm64", { kind: "binary", target: "linux-arm64" }],
-  ["aidlc-linux-arm64-musl", { kind: "binary", target: "linux-arm64-musl" }],
-  ["aidlc-linux-x64", { kind: "binary", target: "linux-x64" }],
-  ["aidlc-linux-x64-musl", { kind: "binary", target: "linux-x64-musl" }],
-  ["aidlc-runtime.tar.gz", { kind: "runtime" }],
-  ["aidlc-windows-x64.exe", { kind: "binary", target: "windows-x64" }],
-  ["install.ps1", { kind: "installer" }],
-  ["install.sh", { kind: "installer" }],
-]);
+}> {
+  return new Map([
+    ["aidlc-darwin-arm64", { kind: "binary", target: "darwin-arm64" }],
+    ["aidlc-darwin-x64", { kind: "binary", target: "darwin-x64" }],
+    ["aidlc-linux-arm64", { kind: "binary", target: "linux-arm64" }],
+    ["aidlc-linux-arm64-musl", { kind: "binary", target: "linux-arm64-musl" }],
+    ["aidlc-linux-x64", { kind: "binary", target: "linux-x64" }],
+    ["aidlc-linux-x64-musl", { kind: "binary", target: "linux-x64-musl" }],
+    [releaseRuntimeAsset(version), { kind: "runtime" }],
+    ["aidlc-windows-x64.exe", { kind: "binary", target: "windows-x64" }],
+    ["install.ps1", { kind: "installer" }],
+    ["install.sh", { kind: "installer" }],
+  ]);
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -392,8 +397,12 @@ function verifyCandidate(args: string[]): void {
     ],
     "version.json",
   );
-  if (rawManifest.sourceRef !== "refs/heads/main") {
-    throw new Error("version.json sourceRef must be refs/heads/main");
+  if (typeof rawManifest.version !== "string") {
+    throw new Error("version.json version must be strict semver");
+  }
+  const expectedAssets = releaseAssets(rawManifest.version);
+  if (rawManifest.sourceRef !== `refs/tags/v${rawManifest.version}`) {
+    throw new Error("version.json sourceRef must match its version tag");
   }
   if (
     typeof rawManifest.sourceDigest !== "string" ||
@@ -427,7 +436,7 @@ function verifyCandidate(args: string[]): void {
   for (const [index, value] of rawManifest.assets.entries()) {
     const asset = record(value, `version.json asset ${index}`);
     const name = typeof asset.name === "string" ? asset.name : "";
-    const expected = RELEASE_ASSETS.get(name);
+    const expected = expectedAssets.get(name);
     exactKeys(
       asset,
       expected?.kind === "binary"
@@ -444,7 +453,7 @@ function verifyCandidate(args: string[]): void {
     }
   }
 
-  const expectedAssetNames = [...RELEASE_ASSETS.keys()].sort();
+  const expectedAssetNames = [...expectedAssets.keys()].sort();
   const manifest = verifyReleaseDirectory(directory, expectedAssetNames);
   if (tag !== `v${manifest.version}`) {
     throw new Error(`release tag ${tag} does not match version.json ${manifest.version}`);
@@ -463,7 +472,7 @@ function verifyCandidate(args: string[]): void {
     throw new Error("version.json has an invalid asset inventory");
   }
   for (const asset of manifest.assets) {
-    const expected = RELEASE_ASSETS.get(asset.name);
+    const expected = expectedAssets.get(asset.name);
     if (
       !expected ||
       asset.kind !== expected.kind ||

@@ -287,8 +287,7 @@ try {
   & $ghPath attestation verify $checksumsPath `
     --bundle $bundle `
     --repo $releaseRepository `
-    --signer-workflow $releaseWorkflow `
-    --source-ref 'refs/heads/main' | Out-Null
+    --signer-workflow $releaseWorkflow | Out-Null
   if ($LASTEXITCODE -ne 0) {
     Stop-Install -Code 4 -Status 'failed' `
       -Message 'release provenance verification failed' `
@@ -300,7 +299,7 @@ try {
       -Message 'checksum mismatch for version.json'
   }
   if (
-    $manifest.sourceRef -ne 'refs/heads/main' -or
+    $manifest.sourceRef -ne "refs/tags/v$($manifest.version)" -or
     $manifest.sourceDigest -notmatch '^[a-f0-9]{40}$'
   ) {
     Stop-Install -Code 4 -Status 'failed' `
@@ -336,7 +335,8 @@ try {
   }
   $Version = $manifest.version
 
-  $assets = @("aidlc-windows-x64.exe", "aidlc-runtime.tar.gz")
+  $runtimeAsset = "aidlc-runtime-$Version.tar.gz"
+  $assets = @("aidlc-windows-x64.exe", $runtimeAsset)
   foreach ($name in $assets) {
     $asset = @($manifest.assets | Where-Object { $_.name -eq $name })
     if ($asset.Count -ne 1) {

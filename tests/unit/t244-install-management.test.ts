@@ -88,6 +88,7 @@ const NEXT_VERSION = patchVersion(1);
 const LIVE_PIN_VERSION = patchVersion(2);
 const STALE_PIN_VERSION = patchVersion(3);
 const REMOVABLE_VERSION = patchVersion(4);
+const RUNTIME_ASSET = `aidlc-runtime-${AIDLC_VERSION}.tar.gz`;
 
 afterAll(() => {
   if (originalPath === undefined) delete process.env.PATH;
@@ -112,7 +113,7 @@ function writeVerifierCandidate(root: string): void {
     ["aidlc-linux-arm64-musl", "binary", "linux-arm64-musl"],
     ["aidlc-linux-x64", "binary", "linux-x64"],
     ["aidlc-linux-x64-musl", "binary", "linux-x64-musl"],
-    ["aidlc-runtime.tar.gz", "runtime", undefined],
+    [RUNTIME_ASSET, "runtime", undefined],
     ["aidlc-windows-x64.exe", "binary", "windows-x64"],
     ["install.ps1", "installer", undefined],
     ["install.sh", "installer", undefined],
@@ -142,7 +143,7 @@ function writeVerifierCandidate(root: string): void {
     schemaVersion: 1,
     version: AIDLC_VERSION,
     date: "2026-08-28",
-    sourceRef: "refs/heads/main",
+    sourceRef: `refs/tags/v${AIDLC_VERSION}`,
     sourceDigest: "1".repeat(40),
     distributions: RELEASE_HARNESSES.map((name) => ({
       name,
@@ -1516,11 +1517,11 @@ describe("t244 Windows and completion release surfaces", () => {
       join(release, "version.json"),
       `${JSON.stringify({
         version: AIDLC_VERSION,
-        sourceRef: "refs/heads/main",
+        sourceRef: `refs/tags/v${AIDLC_VERSION}`,
         sourceDigest: "1".repeat(40),
       })}\n`,
     );
-    writeFileSync(join(release, "aidlc-runtime.tar.gz"), "runtime\n");
+    writeFileSync(join(release, RUNTIME_ASSET), "runtime\n");
     writeFileSync(
       join(release, "aidlc-release.intoto.jsonl"),
       "aidlc-test-release-provenance\n",
@@ -1529,7 +1530,7 @@ describe("t244 Windows and completion release surfaces", () => {
     const assets = [
       "version.json",
       binaryName,
-      "aidlc-runtime.tar.gz",
+      RUNTIME_ASSET,
       "install.sh",
     ];
     writeFileSync(
@@ -1964,15 +1965,18 @@ describe("t244 Windows and completion release surfaces", () => {
     );
     expect(workflow).toContain('--organization-owners "$organization_owners"');
     expect(workflow).toContain(".enabled == true and .enforced_by_owner == true");
-    expect(workflow).toContain('[.[].branch_policies[]][0].name == "main"');
+    expect(workflow).toContain('[.[].branch_policies[]][0].name == "v*"');
     expect(workflow).toContain("bun scripts/verify-release.ts controls");
     expect(workflow).toContain('--creation-actor-type Integration');
     expect(workflow).toContain(`ref: \${{ needs.authorize.outputs.sha }}`);
-    expect(workflow).toContain("git fetch --no-tags origin main");
-    expect(workflow).not.toContain('git ls-remote --tags origin');
-    expect(workflow).not.toContain("tag_sha=");
-    expect(workflow).toContain('test "$GITHUB_REF" = "refs/heads/main"');
-    expect(workflow).not.toContain("\n  push:");
+    expect(workflow).toContain('"refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"');
+    expect(workflow).toContain("tag_sha=");
+    expect(workflow).toContain('test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"');
+    expect(workflow).toContain("\n  push:");
+    expect(workflow).toContain(
+      `awk -F'"' '/^export const AIDLC_VERSION = "/ { print $2 }'`,
+    );
+    expect(workflow).toContain('test "$RELEASE_TAG" = "v$version"');
     expect(workflow).not.toContain("origin/v2");
     expect(workflow.indexOf("name: Authorize release source and publication target"))
       .toBeLessThan(workflow.indexOf("name: Mint release authorization token"));
@@ -2081,7 +2085,7 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(windows).toContain("aidlc-lifecycle-provenance-fixture");
     expect(windows).toContain("aidlc-gh.ps1");
     expect(windows).toContain("$env:AIDLC_GH_BIN = $ghFixture");
-    expect(windows).toContain("$Remaining.Count -ne 11");
+    expect(windows).toContain("$Remaining.Count -ne 9");
     expect(windows).toContain("$Remaining.Count -ne 13");
     expect(windows).toContain("$Remaining[0] -ne 'attestation'");
     expect(windows).toContain("$Remaining[1] -ne 'verify'");
@@ -2141,7 +2145,7 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(unix).toContain('install.sh" --from "$release" --offline');
     expect(unix).toContain("aidlc-lifecycle-provenance-fixture");
     expect(unix).toContain('AIDLC_GH_BIN="$gh_bin"');
-    expect(unix).toContain('[ "$#" -eq 11 ] || [ "$#" -eq 13 ]');
+    expect(unix).toContain('[ "$#" -eq 9 ] || [ "$#" -eq 13 ]');
     expect(unix).toContain('[ "$4" = --bundle ] || exit 2');
     expect(unix).toMatch(
       /\[ "\$5" = "\$\{3%\/checksums\.txt\}\/aidlc-release\.intoto\.jsonl" \] \|\| exit 2/,
@@ -2203,7 +2207,7 @@ describe("t244 Windows and completion release surfaces", () => {
     writeFileSync(bundle, "bundle fixture\n");
     const repository = "awslabs/aidlc-workflows";
     const signerWorkflow = `${repository}/.github/workflows/release.yml`;
-    const sourceRef = "refs/heads/main";
+    const sourceRef = `refs/tags/v${AIDLC_VERSION}`;
     const sourceDigest = "1".repeat(40);
     const checksumSha = createHash("sha256")
       .update(readFileSync(checksums))
@@ -2295,8 +2299,8 @@ describe("t244 Windows and completion release surfaces", () => {
     expect(parsed.jobs.publish.environment).toBe("release");
     const publish = workflowJob(workflow, "publish");
     expect(publish).toContain(`ref: \${{ needs.authorize.outputs.sha }}`);
-    expect(publish).toContain("git fetch --no-tags origin main");
-    expect(publish).not.toContain("git ls-remote --tags origin");
+    expect(publish).toContain('"refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"');
+    expect(publish).toContain('git rev-parse "$RELEASE_TAG^{commit}"');
     expect(publish).toContain('test "$(git rev-parse HEAD)" = "$AUTHORIZED_SHA"');
     expect(publish).toContain("sha256sum -c checksums.txt");
     expect(publish).toContain("name: Attest staged release assets");

@@ -360,7 +360,6 @@ fi
   --bundle "$TMP/aidlc-release.intoto.jsonl" \
   --repo "$RELEASE_REPOSITORY" \
   --signer-workflow "$RELEASE_WORKFLOW" \
-  --source-ref "refs/heads/main" \
   >/dev/null 2>"$TMP/provenance.err" ||
   fail 4 failed "release provenance verification failed" \
     "obtain the release from $RELEASE_REPOSITORY"
@@ -377,7 +376,7 @@ printf '%s\n' "$candidate_version" |
   fail 4 failed "version.json has no valid version."
 source_ref=$(sed -n 's/.*"sourceRef":[[:space:]]*"\([^"]*\)".*/\1/p' "$TMP/version.json" | head -n 1)
 source_digest=$(sed -n 's/.*"sourceDigest":[[:space:]]*"\([a-f0-9]*\)".*/\1/p' "$TMP/version.json" | head -n 1)
-[ "$source_ref" = "refs/heads/main" ] ||
+[ "$source_ref" = "refs/tags/v$candidate_version" ] ||
   fail 4 failed "version.json has an invalid release source ref"
 printf '%s\n' "$source_digest" | grep -Eq '^[a-f0-9]{40}$' ||
   fail 4 failed "version.json has an invalid release source digest"
@@ -396,7 +395,8 @@ if [ -n "$requested_version" ] && [ "$requested_version" != "$candidate_version"
 fi
 VERSION=$candidate_version
 BINARY="aidlc-$TARGET"
-ASSETS="$BINARY aidlc-runtime.tar.gz"
+RUNTIME_ASSET="aidlc-runtime-$VERSION.tar.gz"
+ASSETS="$BINARY $RUNTIME_ASSET"
 [ -z "$FROM" ] || ASSETS="$ASSETS install.sh"
 
 for asset in $ASSETS; do

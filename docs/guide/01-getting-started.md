@@ -306,20 +306,21 @@ than copying a repository tree:
 ```bash
 tag=vX.Y.Z
 tmp="$(mktemp -d)"
+runtime_asset="aidlc-runtime-${tag#v}.tar.gz"
 publication_repo="${AIDLC_PUBLICATION_REPOSITORY:-awslabs/aidlc-workflows-releases}"
 source_repo="${AIDLC_RELEASE_REPOSITORY:-awslabs/aidlc-workflows}"
 release_workflow="${AIDLC_RELEASE_WORKFLOW:-$source_repo/.github/workflows/release.yml}"
 gh release download "$tag" --repo "$publication_repo" --dir "$tmp" \
-  --pattern aidlc-runtime.tar.gz \
+  --pattern "$runtime_asset" \
   --pattern checksums.txt \
   --pattern aidlc-release.intoto.jsonl
 gh attestation verify "$tmp/checksums.txt" \
   --bundle "$tmp/aidlc-release.intoto.jsonl" \
   --repo "$source_repo" \
   --signer-workflow "$release_workflow" \
-  --source-ref refs/heads/main
-(cd "$tmp" && grep '  aidlc-runtime.tar.gz$' checksums.txt | sha256sum -c -)
-tar -xzf "$tmp/aidlc-runtime.tar.gz" -C "$tmp"
+  --source-ref "refs/tags/$tag"
+(cd "$tmp" && grep "  $runtime_asset\$" checksums.txt | sha256sum -c -)
+tar -xzf "$tmp/$runtime_asset" -C "$tmp"
 RUNTIME_ROOT="$tmp/runtime"
 ```
 

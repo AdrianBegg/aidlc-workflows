@@ -74,6 +74,7 @@ import {
 import {
   acquireRelease,
   digest,
+  releaseRuntimeAsset,
   ReleaseUnavailableError,
 } from "./aidlc-release.ts";
 import {
@@ -238,7 +239,6 @@ export function validatePublicLifecycleArgs(
   return null;
 }
 
-const RUNTIME_ASSET = "aidlc-runtime.tar.gz";
 const COMPLETION_FILES: Readonly<Record<Shell, string>> = {
   bash: "aidlc.bash",
   zsh: "_aidlc",
@@ -1090,16 +1090,20 @@ async function installVersion(options: {
 }): Promise<{ version: string; distributions: string[] }> {
   const wantedVersion = options.version ? requestedVersion(options.version) : undefined;
   const target = targetTriple();
-  const required = [binaryAsset(target), RUNTIME_ASSET];
   const release = await acquireRelease({
     version: wantedVersion,
     from: options.from,
-    names: required,
+    names: (manifest) => [
+      binaryAsset(target),
+      releaseRuntimeAsset(manifest.version),
+    ],
     offline: options.offline,
     baseUrl: options.baseUrl,
     caBundle: options.caBundle,
   });
   const version = release.manifest.version;
+  const runtimeAsset = releaseRuntimeAsset(version);
+  const required = [binaryAsset(target), runtimeAsset];
   const releaseReservation = options.dryRun ? null : reserveVersion(version);
   const temporary = mkdtempSync(join(tmpdir(), `aidlc-version-${version}-`));
   try {
@@ -1112,7 +1116,7 @@ async function installVersion(options: {
     );
     writeFileSync(candidateExecutable, readFileSync(binarySource), { mode: 0o755 });
     if (process.platform !== "win32") chmodSync(candidateExecutable, 0o755);
-    extractTarGz(join(release.directory, RUNTIME_ASSET), candidate, {
+    extractTarGz(join(release.directory, runtimeAsset), candidate, {
       reservedTopLevelNames: ["aidlc", "aidlc.exe"],
     });
     const distributions = release.manifest.distributions.map((item) => item.name).sort();

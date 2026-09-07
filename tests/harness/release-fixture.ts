@@ -175,6 +175,7 @@ export function writeReleaseFixture(options: ReleaseFixtureOptions): ReleaseFixt
   const repoRoot = options.repoRoot ?? REPO_ROOT;
   const version = requireVersion(options.version ?? AIDLC_VERSION);
   const reportedVersion = requireVersion(options.reportedVersion ?? version);
+  const runtimeAsset = `aidlc-runtime-${version}.tar.gz`;
   const target = options.target ?? targetTriple();
   const releaseProjectionRoot = join(repoRoot, "dist-release");
   const distributions = [...(options.distributions ??
@@ -257,7 +258,7 @@ export function writeReleaseFixture(options: ReleaseFixtureOptions): ReleaseFixt
       }
     }
     writeFileSync(
-      join(options.root, "aidlc-runtime.tar.gz"),
+      join(options.root, runtimeAsset),
       createTarGz(runtimeEntries),
     );
   } finally {
@@ -266,7 +267,7 @@ export function writeReleaseFixture(options: ReleaseFixtureOptions): ReleaseFixt
 
   const names = [
     binaryName,
-    "aidlc-runtime.tar.gz",
+    runtimeAsset,
     "install.sh",
     "install.ps1",
   ];
@@ -274,12 +275,12 @@ export function writeReleaseFixture(options: ReleaseFixtureOptions): ReleaseFixt
     name,
     sha256: digest(join(options.root, name)),
     bytes: statSync(join(options.root, name)).size,
-    kind: name === "aidlc-runtime.tar.gz"
+    kind: name === runtimeAsset
       ? "runtime" as const
       : name === "install.sh" || name === "install.ps1"
       ? "installer" as const
       : "binary" as const,
-    ...(name === "install.sh" || name === "install.ps1" || name === "aidlc-runtime.tar.gz"
+    ...(name === "install.sh" || name === "install.ps1" || name === runtimeAsset
       ? {}
       : { target }),
   }));
@@ -287,7 +288,7 @@ export function writeReleaseFixture(options: ReleaseFixtureOptions): ReleaseFixt
     schemaVersion: 1,
     version,
     date: "2026-07-17",
-    sourceRef: "refs/heads/main",
+    sourceRef: `refs/tags/v${version}`,
     sourceDigest: "0".repeat(40),
     distributions: distributionRows,
     assets,
@@ -316,7 +317,7 @@ export function writeReleaseFixture(options: ReleaseFixtureOptions): ReleaseFixt
     const malformed = join(options.hostileRoot, "malformed-gzip.tgz");
     writeFileSync(malformed, "not a gzip stream\n");
     hostileArchives.push(malformed);
-    const safeArchive = join(options.root, "aidlc-runtime.tar.gz");
+    const safeArchive = join(options.root, runtimeAsset);
     const safeBytes = readFileSync(safeArchive);
     const truncated = join(options.hostileRoot, "truncated-archive.tgz");
     writeFileSync(truncated, safeBytes.subarray(0, Math.max(1, Math.floor(safeBytes.length / 2))));
@@ -435,7 +436,7 @@ export async function checkLiveReleaseContract(
   const expected = [
     "install.sh",
     "install.ps1",
-    "aidlc-runtime.tar.gz",
+    `aidlc-runtime-${manifest.version}.tar.gz`,
   ];
   for (const name of expected) {
     if (!assetNames.includes(name)) throw new Error(`live release is missing ${name}`);

@@ -37,18 +37,17 @@ dedicated publication repository. The source repository contains reviewed code
 and the signing workflow; the publication repository contains release records
 and grants no direct human or team write, maintain, or administrator authority.
 Organization owners retain unavoidable administrator authority and are trusted
-publication actors. The workflow has no tag-push trigger. A maintainer manually
-dispatches it from
-`refs/heads/main` and names the new tag. `authorize` fetches current source
-`main`, requires `github.sha`, checked-out `HEAD`, and `origin/main` to be the
-same commit, and requires protected-environment
+publication actors. Pushing a strict `vX.Y.Z` tag starts the workflow.
+`authorize` requires `github.ref`, `github.sha`, checked-out `HEAD`, and the tag
+target to identify the same commit. It requires that commit to be an ancestor
+of `origin/main`, and requires the tag version to equal `AIDLC_VERSION`.
+It also requires protected-environment
 `AIDLC_PUBLICATION_REPOSITORY` to name a different repository under the same
 owner.
 The protected `release` environment requires non-author approval and protects
-the authorization App credentials. Its sole deployment policy is the `main`
-branch because GitHub evaluates environment policies against the dispatch ref,
-not the tag supplied as workflow input. `authorize` proves the exact equality
-above using only the normal read token. Only then does it mint a short-lived App
+the authorization App credentials. Its sole deployment policy is the `v*` tag
+pattern. `authorize` proves the source identity above using only the normal
+read token. Only then does it mint a short-lived App
 token scoped to the source and publication repositories, use it to read the
 otherwise-hidden ruleset bypass actors, publication collaborator permissions,
 and organization-owner list, and emit a distinct authorization identity error
@@ -101,7 +100,7 @@ discovery and linked to its corrective release without deleting the original
 release, tag, attestations, or audit record.
 
 `scripts/package-release.ts` stages `version.json`, `checksums.txt`, installers,
-binaries, and `aidlc-runtime.tar.gz`. Full package generation first removes
+binaries, and `aidlc-runtime-X.Y.Z.tar.gz`. Full package generation first removes
 generated harness and plugin roots that no longer exist in source, and release
 assembly independently requires the generated harness/plugin inventory to
 equal the authored inventory before archiving. The staging job verifies those bytes,
@@ -168,7 +167,7 @@ partial namespaces fail closed. It also fails if the publication repository is
 the source repository, collaborator or organization-owner enumeration is
 unreadable, or any listed non-owner principal has push, maintain, or
 administrator authority. Every
-source-consuming job checks out the authorized main SHA; the publisher checks
+source-consuming job checks out the authorized tag SHA; the publisher checks
 that the final publication tag remains absent before staging and promotion.
 
 ### Mirror or download tampering
@@ -181,9 +180,10 @@ validates the exact manifest and directory inventory, and verifies every
 manifest asset through both provenance paths before release creation. Remote
 and local installers, plus `core/tools/aidlc-release.ts`, first verify
 the attestation for `checksums.txt` against the repository, signer workflow,
-and `refs/heads/main` using `aidlc-release.intoto.jsonl`. They then verify the
-`version.json` checksum, read its authenticated `sourceDigest`, and verify the
-same attestation again with both `--source-ref refs/heads/main` and
+and the signer workflow using `aidlc-release.intoto.jsonl`. They then verify the
+`version.json` checksum, require its authenticated `sourceRef` to match its
+version tag, read its `sourceDigest`, and verify the same attestation again
+with both `--source-ref refs/tags/vX.Y.Z` and
 `--source-digest <reviewed source commit>`. Only then do they verify each selected asset
 against both the manifest and checksum row. Asset names are basename-only and
 metadata and asset sizes are bounded. Mirrors must carry the complete
@@ -259,7 +259,7 @@ source_digest=<reviewed-source-commit-from-authenticated-version.json>
 gh attestation verify ./aidlc-linux-x64 \
   --repo awslabs/aidlc-workflows \
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref refs/heads/main \
+  --source-ref "refs/tags/$tag" \
   --source-digest "$source_digest"
 ```
 
@@ -271,7 +271,7 @@ gh attestation verify ./aidlc-linux-x64 \
   --bundle ./aidlc-release.intoto.jsonl \
   --repo awslabs/aidlc-workflows \
   --signer-workflow awslabs/aidlc-workflows/.github/workflows/release.yml \
-  --source-ref refs/heads/main \
+  --source-ref refs/tags/vX.Y.Z \
   --source-digest "$source_digest"
 ```
 
@@ -293,7 +293,7 @@ release base URL. A publication or mirror URL does not implicitly broaden or
 replace the provenance trust root.
 
 Fork release rehearsals must also configure the protected `release`
-environment with exactly the `main` branch deployment policy, its authorization
+environment with exactly the `v*` tag deployment policy, its authorization
 App identity, the `aidlc-admins` team as the sole reviewer, immutable releases,
 and both release-tag rulesets. A personal-account fork without teams cannot
 satisfy this production release contract.
@@ -310,8 +310,8 @@ installers. `version.json` contains:
 - `schemaVersion`
 - `version`
 - `date`
-- `sourceRef`, fixed to `refs/heads/main`
-- `sourceDigest`, the exact 40-hex commit shared by `main` and the release tag
+- `sourceRef`, fixed to `refs/tags/v<version>`
+- `sourceDigest`, the exact 40-hex commit targeted by the release tag
 - `distributions[]` with `name` and `productName`
 - `assets[]` with `name`, `sha256`, `bytes`, and `kind`
 - binary-only `target`
@@ -409,8 +409,8 @@ the protected release App. Organization owners retain their separately
 documented trusted authority. A team approval authorizes one App-mediated
 publication without granting ordinary source-repository credentials authority
 over the draft or official tag. The separate update-plus-deletion ruleset has no
-bypass actor, including for the App or team. The GitHub Release is published by
-a main-branch manual dispatch.
+bypass actor, including for the App or team. A strict version tag triggers the
+GitHub Release workflow.
 
 ## 8. No OS code-signing
 

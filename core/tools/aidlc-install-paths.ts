@@ -396,7 +396,7 @@ export function inspectInstalledVersion(
   const runtimeAssetDeclared = manifest.assets.some((asset) =>
     Boolean(asset) &&
     typeof asset === "object" &&
-    (asset as { name?: unknown }).name === "aidlc-runtime.tar.gz"
+    (asset as { name?: unknown }).name === `aidlc-runtime-${version}.tar.gz`
   );
   if (runtimeAssetDeclared || manifest.installedRuntime !== undefined) {
     const installedRuntime = manifest.installedRuntime as {
