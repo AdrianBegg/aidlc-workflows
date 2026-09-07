@@ -48,9 +48,9 @@
 //
 // FIXTURE DISCIPLINE — replicate the .sh's make_workflow (t131:76-85) EXACTLY:
 // a fresh temp project with aidlc-docs/ + a self-contained .claude/ skeleton
-// holding the five tool modules (runtime, lib, artifact vocabulary, runtime
-// paths, and audit) + data/stage-graph.json + the two driven hooks copied in,
-// plus a minimal
+// holding the eight tool modules (runtime, lib, settings, install paths,
+// distribution, artifact vocabulary, runtime paths, and audit) +
+// data/stage-graph.json + the two driven hooks copied in, plus a minimal
 // aidlc-state.md ("- **Scope**: bugfix"). The COPY (not symlink) matters: the
 // runtime-compile hook spawns <proj>/.claude/tools/aidlc-runtime.ts, whose
 // aidlc-lib.ts resolves data/stage-graph.json relative to its own location —
@@ -273,8 +273,11 @@ function makeProject(withState: boolean): string {
   for (const t of [
     "aidlc-runtime.ts",
     "aidlc-lib.ts",
+    "aidlc-settings.ts",
+    "aidlc-install-paths.ts",
+    "aidlc-distribution.ts",
     "aidlc-artifact-vocabulary.ts",
-    "aidlc-settings.ts", "aidlc-runtime-paths.ts",
+    "aidlc-runtime-paths.ts",
     "aidlc-audit.ts",
   ]) {
     copyFileSync(join(SRC_TOOLS, t), join(proj, ".claude", "tools", t));
