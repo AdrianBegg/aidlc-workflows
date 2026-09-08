@@ -1544,6 +1544,83 @@ describe("t218 Kiro IDE plan-approval enforcement", () => {
     }
   });
 
+  // #1039: Kiro's documented first-party read tools must never be classified
+  // as mutation-capable. Before the fix, `read_file`/`read_files` (path-bearing)
+  // were forwarded to the core guard and denied as "unknown mutation-capable
+  // tool", and `list_directory`/`web_fetch` (path-less) hit the legacy
+  // "not safely attributable" deny. Both blocked the reads the conductor needs
+  // to re-run Plan Approval after a lost receipt.
+  test("Kiro read tools pass the plan-approval guard during an unapproved code-generation window (#1039)", () => {
+    const dir = scratchProject(true);
+    try {
+      seedCodeGenerationDirective(dir);
+      const questions = join(
+        dir,
+        "aidlc",
+        "construction",
+        "code-generation",
+        "code-generation-questions.md",
+      );
+
+      // 1.x stdin payloads: path-bearing reads.
+      for (const [tool_name, tool_input] of [
+        ["read_file", { path: questions }],
+        ["read_files", { paths: [questions] }],
+        ["fs_read", { path: questions }],
+        ["read_code", { path: questions }],
+        ["list_directory", { path: dirname(questions) }],
+        ["file_search", { pattern: "**/*.md" }],
+        ["grep_search", { query: "Answer" }],
+        ["web_fetch", { url: "https://example.com" }],
+        ["web_search", { query: "aidlc" }],
+      ] as const) {
+        const result = runIdeStdin(
+          dir,
+          "plan-approval-guard",
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            cwd: dir,
+            tool_name,
+            tool_input,
+          }),
+        );
+        expect(result.code, `${tool_name}: ${result.stderr}`).toBe(0);
+      }
+
+      // Legacy 0.12 USER_PROMPT payloads: argument-less reads.
+      for (const toolName of [
+        "read_file",
+        "read_files",
+        "list_directory",
+        "read_code",
+        "web_fetch",
+      ]) {
+        const result = runIde(
+          dir,
+          "plan-approval-guard",
+          JSON.stringify({ toolName, toolArgs: {} }),
+        );
+        expect(result.code, `${toolName}: ${result.stderr}`).toBe(0);
+      }
+
+      // The write deny is unchanged.
+      expect(
+        runIdeStdin(
+          dir,
+          "plan-approval-guard",
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            cwd: dir,
+            tool_name: "fs_write",
+            tool_input: { path: join(dir, "src", "blocked.ts") },
+          }),
+        ).code,
+      ).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("legacy 0.12 consumes directive-issued choices while PostToolUse stays silent", () => {
     const dir = scratchProject(true);
     try {

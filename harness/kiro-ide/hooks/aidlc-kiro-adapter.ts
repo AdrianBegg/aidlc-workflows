@@ -164,10 +164,28 @@ const LEGACY_PLANNING_WRITE_TOOLS = new Set([
   "fs_write",
   "str_replace",
 ]);
+// Kiro's first-party read-only tools (https://kiro.dev/docs/tools/). The
+// plan-approval classifier is fail-closed by exclusion, so every documented
+// read verb and alias must be listed here: a read that is missing from this
+// set is treated as an opaque mutation and denied during a live Code
+// Generation window, which blocks the very reads needed to re-run Plan
+// Approval after a lost receipt (#1039). A listed tool returns null before
+// any forward to the core guard, so this set is the single classification
+// point for reads on this harness. Shell, MCP, and sub-agent dispatch stay
+// out of this set on purpose.
 const PLAN_APPROVAL_SAFE_READ_TOOLS = new Set([
   "fs_read",
+  "read",
+  "read_file",
+  "read_files",
+  "read_code",
+  "list_directory",
   "file_search",
+  "glob",
   "grep_search",
+  "grep",
+  "web_fetch",
+  "web_search",
   "thinking",
   "todo_list",
 ]);
