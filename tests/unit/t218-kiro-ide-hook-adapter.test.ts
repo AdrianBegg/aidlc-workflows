@@ -1621,6 +1621,89 @@ describe("t218 Kiro IDE plan-approval enforcement", () => {
     }
   });
 
+  // #1039 (latch path): the legacy write-recovery latch at
+  // `activeWriteWindows` also classifies by `mutationCapableTool()`. Before
+  // the fix, a Kiro read arriving while the latch was active was denied with
+  // "a legacy write did not complete PostToolUse mediation". A listed read
+  // must pass while the write and shell denies on the latch stay in place.
+  test("Kiro read tools pass the legacy write-recovery latch while writes and shell stay denied (#1039)", () => {
+    const dir = scratchProject(true);
+    try {
+      initGitWorkspace(dir);
+      seedCodeGenerationDirective(dir);
+      // Open the latch: a guarded legacy write, then a PostToolUse that
+      // destroys state authority so the window is left unresolved.
+      expect(
+        runIde(
+          dir,
+          "plan-approval-guard",
+          JSON.stringify({ toolName: "fs_write", toolArgs: {} }),
+        ).code,
+      ).toBe(0);
+      const statePath = seededStateFile(dir);
+      rmSync(statePath, { force: true });
+      expect(
+        runIde(
+          dir,
+          "audit-and-sensors",
+          ctx("fs_write", `Deleted the ${statePath} file.`),
+        ).code,
+      ).toBe(0);
+      // Latch is active: a legacy write is denied on the recovery path.
+      const latched = runIde(
+        dir,
+        "plan-approval-guard",
+        JSON.stringify({ toolName: "fs_write", toolArgs: {} }),
+      );
+      expect(latched.code).toBe(2);
+      expect(latched.stderr).toContain(
+        "did not complete PostToolUse mediation",
+      );
+
+      // Reads pass the latch in both payload shapes.
+      for (const toolName of [
+        "read_file",
+        "read_files",
+        "list_directory",
+        "read_code",
+        "fs_read",
+        "web_fetch",
+      ]) {
+        const legacy = runIde(
+          dir,
+          "plan-approval-guard",
+          JSON.stringify({ toolName, toolArgs: {} }),
+        );
+        expect(legacy.code, `legacy ${toolName}: ${legacy.stderr}`).toBe(0);
+        const modern = runIdeStdin(
+          dir,
+          "plan-approval-guard",
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            cwd: dir,
+            tool_name: toolName,
+            tool_input: { path: join(dir, "README.md") },
+          }),
+        );
+        expect(modern.code, `1.x ${toolName}: ${modern.stderr}`).toBe(0);
+      }
+
+      // The latch still denies writes and shell.
+      for (const toolName of ["fs_write", "str_replace", "execute_bash"]) {
+        expect(
+          runIde(
+            dir,
+            "plan-approval-guard",
+            JSON.stringify({ toolName, toolArgs: {} }),
+          ).code,
+          toolName,
+        ).toBe(2);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
+
   test("legacy 0.12 consumes directive-issued choices while PostToolUse stays silent", () => {
     const dir = scratchProject(true);
     try {

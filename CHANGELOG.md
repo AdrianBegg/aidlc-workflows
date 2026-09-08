@@ -1,6 +1,13 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## [2.8.1] - 2026-09-08
+
+Fix a Kiro IDE Plan Approval stop that denied the IDE's own read tools during a Code Generation approval window. The kiro-ide adapter classifies tools by exclusion, and its safe-read allowlist named only the `fs_read` alias, so Kiro's documented read tools were treated as opaque mutations. **Upgrade:** use `install.sh --version 2.8.1`, `install.ps1 -Version 2.8.1`, or replace a manual copy with `runtime/kiro-ide/` from `aidlc-runtime-2.8.1.tar.gz`; no workflow state migration is required. Closes #1039.
+
+* Kiro IDE read tools (`read_file`, `read_files`, `list_directory`, `read_code`, `web_fetch`, `web_search`, and the `read`, `glob`, `grep` aliases) no longer fail during Code Generation with `unknown mutation-capable tool` or `this mutation-capable tool is not safely attributable`.
+* Disabling `aidlc-plan-approval-guard.json` is no longer needed to recover a Code Generation plan approval on Kiro IDE. Writes, shell, MCP, and sub-agent dispatch stay guarded.
+
 ## [2.8.0] - 2026-09-08
 
 AI-DLC 2.8.0 consolidates the 2.7.x release cycle into a new minor baseline without changing runtime behavior from 2.7.2. **Upgrade:** use `install.sh --version 2.8.0`, `install.ps1 -Version 2.8.0`, or replace a manual copy with `runtime/<harness>/` from `aidlc-runtime-2.8.0.tar.gz`. Existing 2.7.2 workflow records require no migration. Upgrades from earlier releases must still apply every intervening **Upgrade**, **Breaking**, and migration note below.

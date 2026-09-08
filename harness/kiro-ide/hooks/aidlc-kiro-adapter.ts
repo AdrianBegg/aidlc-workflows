@@ -169,10 +169,12 @@ const LEGACY_PLANNING_WRITE_TOOLS = new Set([
 // read verb and alias must be listed here: a read that is missing from this
 // set is treated as an opaque mutation and denied during a live Code
 // Generation window, which blocks the very reads needed to re-run Plan
-// Approval after a lost receipt (#1039). A listed tool returns null before
-// any forward to the core guard, so this set is the single classification
-// point for reads on this harness. Shell, MCP, and sub-agent dispatch stay
-// out of this set on purpose.
+// Approval after a lost receipt (#1039). For a well-formed payload, a listed
+// tool returns null before any forward to the core guard, so this set is the
+// classification point for reads on this harness. The malformed-payload
+// branch in buildForward runs first and stays fail-closed: a listed read with
+// a non-object tool_input is still denied during a Code Generation window.
+// Shell, MCP, and sub-agent dispatch stay out of this set on purpose.
 const PLAN_APPROVAL_SAFE_READ_TOOLS = new Set([
   "fs_read",
   "read",
