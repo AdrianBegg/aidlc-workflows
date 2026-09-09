@@ -10643,6 +10643,27 @@ export function parseReviewSection(
   const findings: ReviewFinding[] = [];
   for (const line of table.slice(2)) {
     const cells = splitMarkdownRow(line);
+    // Check arity before positional reads: a missing cell can shift later
+    // values left, but its intended column cannot be recovered reliably.
+    // Show the expected order and offer a hint when a trailing status fits.
+    if (cells.length !== headers.length) {
+      const rowId = cells[index.get("ID") ?? 0]?.trim() || "?";
+      if (cells.length < headers.length) {
+        const lastCell = cells.at(-1) ?? "";
+        const hint = headers.at(-1) === "Status" && validReviewFindingStatus(lastCell)
+          ? `The last cell ${JSON.stringify(lastCell)} looks like Status; check earlier cells for a missing value or "|" separator`
+          : 'Check for a missing cell or "|" separator';
+        throw new Error(
+          `${artifact}#${rowId}: row has ${cells.length} cells, header declares ${headers.length}. ` +
+            `Expected columns: ${headers.join(" | ")}. ${hint}`,
+        );
+      }
+      throw new Error(
+        `${artifact}#${rowId}: row has ${cells.length} cells, header declares ${headers.length}: ${
+          cells.length - headers.length
+        } unexpected extra cell(s)`,
+      );
+    }
     const value = (name: string): string =>
       cells[index.get(name) ?? -1]?.trim() ?? "";
     const id = value("ID");
