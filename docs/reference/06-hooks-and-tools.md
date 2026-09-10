@@ -67,6 +67,14 @@ All seventeen TypeScript hook sources:
 - Resolve `$CLAUDE_PROJECT_DIR` with multiple fallback methods
 - Share locking and utility functions from `lib.ts`
 
+Claude's source-generated `.claude/settings.json` invokes hooks with
+`bun "$CLAUDE_PROJECT_DIR/.claude/tools/aidlc.ts" engine hook <name>` and uses
+the same anchored dispatcher for `engine statusline`. The quoted entry path
+survives project roots containing spaces and application commands that change
+the working directory. It does not change the hook process's working directory
+or the `cwd` supplied in the JSON payload. Native release settings use
+`aidlc engine hook <name>` and `aidlc engine statusline`, without Bun.
+
 ### Observers never write authority
 
 Some engine invocations exist only to LEARN the current directive. There are
@@ -527,6 +535,8 @@ This is one of the framework's six flow-altering hooks and one of its five `PreT
 **Source:** `.claude/hooks/aidlc-plan-approval-guard.ts`
 **Trigger:** Before developer-agent dispatches and mutation-capable file, patch, and shell calls
 **Purpose:** Enforce Code Generation's plan-before-generation ordering (stage Steps 2-4) deterministically
+
+**Planning commands.** Before approval, the guard permits `aidlc engine orchestrate next` and `aidlc engine orchestrate continue <token>` so the conductor can resume on a human turn and finish loading the stage rules. It also permits the Testing Contract's `testing-posture resolve|render|fingerprint|verify` commands and `log decision|answer` for the exact `code-generation` / `plan-approval` checkpoint. The same routes are available through `bun <harness-dir>/tools/aidlc.ts engine ...` (including `bun run`) when the entry point is a real installed file under the current harness's tools directory, with no symlink in its path. Invoke Bun directly: wrappers such as `env` or `sudo` are not exempt because they can change the directory or context in which the script executes. These exceptions do not grant approval or exempt source writes, output redirection into source files, commands that change executable resolution, preloaded code, or additional mutation commands in the same shell call. Descriptor redirection such as `2>&1` remains available.
 
 This is one of the framework's flow-altering hooks and `PreToolUse` controls. The stage prose says generation never begins before the human answers "Approve Plan" - a field report showed a conductor generating the code first and backfilling `code-generation-plan.md` beside `code-summary.md`, turning the plan into a retroactive summary. The stage-completion artifact guard cannot catch that inversion (it fires at completion, when the backfilled plan already exists), so this hook refuses both delegated and inline generation before it starts. A second field report showed the opposite failure: a valid approval was destroyed between the turn that offered it and the turn that recorded the answer, because the question path republished the directive and the republication deleted the plan-approval runtime state. Approval now binds to content and attempt, so re-asking the engine cannot withdraw it.
 

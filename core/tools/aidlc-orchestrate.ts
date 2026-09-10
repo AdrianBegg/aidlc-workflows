@@ -1830,6 +1830,7 @@ function composeDispatchDirective(
     parts.push(
       `Dispatch the composer agent (${hd}/agents/aidlc-composer-agent.md) as a subagent to propose re-shaping the RUNNING workflow's pending stages` +
         (flags.intent ? ` for: "${flags.intent}".` : "."),
+      "This returned directive has selected the composer path. The named-stage fast path is available only BEFORE calling next compose, even when the request names exact stage flips. Dispatch the composer subagent with this message as its task and use its validated proposal at the approval gate. Do not substitute your own state read and proposal for that dispatch.",
       "The composer reads the live state file's Stage Progress, re-estimates the entropy components from what completed stages resolved, validates the flipped grid with --strict, and proposes SKIP/un-SKIP flips for PENDING, ahead-of-cursor stages only (completed [x], in-progress [-], and skipped [S] stages are frozen; an ADD whose required producer is skipped or behind the cursor is rejected, not proposed).",
       "This is mode in-flight, not matched/custom routing: preserve the current scope, depth, frozen actions, and full effective grid; stock-distance rankings are advisory only and MUST NOT trigger stock-grid adoption. Return the exact approved command delta as changes.skip and changes.add arrays.",
       "BEFORE presenting the gate, write the pending-proposal marker `aidlc/.aidlc-compose-pending` (any content) so the turn can end at the gate; on approve run `bun " +
@@ -7919,10 +7920,12 @@ function checkPipelineLinkEvidence(
     ok: false,
     message:
       `${refusal}: ${missing.join(", ")}. ` +
-      `After each link returns, run \`bun ${harnessDir()}/tools/aidlc-log.ts link --stage ${slug} ` +
+      `Re-run \`${aidlcToolInvocation("orchestrate")} next${singleRun ? ` --single --stage ${slug}` : ""}\` ` +
+      `and dispatch the missing pipeline links in their declared order, carrying the human's revision feedback. ` +
+      `Rejection starts a new attempt: earlier scans and receipts cannot certify this revision, even for a targeted artifact edit. ` +
+      `After each link returns, run \`${aidlcToolInvocation("log")} link --stage ${slug} ` +
       `--link <agent>${evidence.repos.length > 0 ? " --repo <repo>" : ""}` +
-      `${singleRun ? " --single" : ""}\`. ` +
-      `Set AIDLC_DISABLE_ENSEMBLE_EVIDENCE=1 only to recover a legitimately-run in-flight pipeline.`,
+      `${singleRun ? " --single" : ""}\`. Do not re-stamp an old handoff or disable evidence checks to reopen the gate.`,
   };
 }
 
@@ -8787,6 +8790,12 @@ function handleReport(args: string[], projectDir: string | undefined): void {
         printDirective(
           revalidatingOpenGate
             ? `Stage "${slug}" is already awaiting approval; gate evidence revalidated.`
+            : flags.result === "rejected" && node.mode === "pipeline"
+            ? `Recorded rejected for "${slug}". The rejection starts a new pipeline attempt; prior receipts no longer apply. ` +
+              `Re-run \`${aidlcToolInvocation("orchestrate")} next\`, then dispatch every missing link in ` +
+              `directive.pipeline order with the exact human feedback. Each link must perform fresh work and return before its ` +
+              `new receipt is recorded. Preserve the configured topology and reviewer policy; a targeted artifact edit does not ` +
+              `permit the conductor to replace the pipeline or reuse its previous handoffs. Report revised only after the fresh chain completes.`
             : `Recorded ${flags.result} for "${slug}".`,
         ),
         changeNoticesFromToolOutput(res.stdout),

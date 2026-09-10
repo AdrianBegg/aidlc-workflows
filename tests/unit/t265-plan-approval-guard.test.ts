@@ -419,6 +419,7 @@ function scratchProject(): string {
     join(dir, ".claude", "hooks", "aidlc-record-human-turn.ts"),
   );
   for (const t of [
+    "aidlc.ts",
     "aidlc-lib.ts",
     "aidlc-settings.ts",
     "aidlc-install-paths.ts",
@@ -875,6 +876,147 @@ describe("t265b hook lifecycle", () => {
       seedUnit(proj, null, { plan: true, answer: "A. Approve Plan" });
       expect(evaluateCodeGenerationApproval(proj, { unit: null }).ok).toBe(true);
       expect(runHook(proj, STAGE_DISPATCH(proj, "Implement the stage-level plan")).code).toBe(0);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  test("native forwarding can resume Plan Approval without authorizing generation (#1047)", () => {
+    const proj = scratchProject();
+    try {
+      seedState(proj);
+      seedActiveDirective(proj, "code-generation");
+      seedUnit(proj, null, { plan: true, answer: null });
+      for (const command of [
+        "aidlc engine orchestrate next",
+        'aidlc engine orchestrate next "Approve Plan"',
+        'aidlc engine orchestrate next "Request Changes"',
+        "aidlc engine orchestrate continue stage-rules-token",
+        "aidlc.exe engine orchestrate next",
+        "aidlc.exe engine orchestrate continue stage-rules-token",
+      ]) {
+        const result = runHook(proj, BASH(command));
+        expect(result.code, `${command}\n${result.stderr}`).toBe(0);
+      }
+      for (const command of [
+        "aidlc engine orchestrate report --stage code-generation --result completed",
+        "aidlc engine state advance",
+        "./aidlc engine orchestrate next",
+        "PATH=. aidlc engine orchestrate next",
+        "env PATH=. aidlc engine orchestrate next",
+        "PATH=.; aidlc engine orchestrate next",
+        "printf next | xargs aidlc engine orchestrate",
+        "aidlc engine orchestrate next; printf code > src/inline.ts",
+        "aidlc engine orchestrate continue stage-rules-token > src/inline.ts",
+        "aidlc engine orchestrate next && bun -e 'await Bun.write(\"src/inline.ts\", \"code\")'",
+      ]) {
+        expect(runHook(proj, BASH(command)).code, command).toBe(2);
+      }
+      expect(runHook(proj, WRITE(join(proj, "src", "inline.ts"))).code).toBe(2);
+      expect(evaluateCodeGenerationApproval(proj, { unit: null }).ok).toBe(false);
+    } finally {
+      rmSync(proj, { recursive: true, force: true });
+    }
+  });
+
+  for (const published of [false, true]) {
+    test(`the shipped Bun entry point permits planning ${published ? "with pending approval" : "before directive publication"}`, () => {
+      const proj = scratchProject();
+      try {
+        seedState(proj);
+        const shadowEntry = join(proj, "other", ".claude", "tools", "aidlc.ts");
+        mkdirSync(join(proj, "other", ".claude", "tools"), { recursive: true });
+        writeFileSync(shadowEntry, "// This is not the installed entry point.\n");
+        writeFileSync(
+          join(proj, "package.json"),
+          JSON.stringify({ scripts: { "2": "touch src/inline.ts" } }),
+        );
+        if (published) {
+          seedActiveDirective(proj, "code-generation");
+          seedUnit(proj, null, { plan: true, answer: null });
+        }
+        const entry = ".claude/tools/aidlc.ts";
+        for (const nonShellBlank of ["\u00a0", "\r", "\v", "\f", "\u2028", "\u2029"]) {
+          for (const suffix of ["", ".ts"]) {
+            const redirected = `printf 'export const bypass=1;' >&1${nonShellBlank}${suffix}`;
+            expect(runHook(proj, BASH(redirected)).code, JSON.stringify(redirected)).toBe(2);
+          }
+        }
+        const wrapped = `env -C other bun ${entry} engine orchestrate next`;
+        expect(runHook(proj, BASH(wrapped)).code, wrapped).toBe(2);
+        for (const command of [
+          `bun ${entry} engine orchestrate next 2>&1`,
+          `bun ${entry} engine orchestrate next 1>&2`,
+          `bun ${entry} engine orchestrate next 2>&-`,
+          `bun ${entry} engine orchestrate next 2>& 1`,
+          `bun run ${entry} engine orchestrate next "Explain the plan"`,
+          `bun ${entry} engine orchestrate continue stage-rules-token`,
+          `bun "${join(proj, entry)}" engine orchestrate next`,
+          `bun ${entry} engine testing-posture resolve`,
+          `bun ${entry} engine testing-posture render`,
+          `bun ${entry} engine testing-posture fingerprint --stage-level`,
+          `bun ${entry} engine testing-posture verify --stage-level`,
+          `bun ${entry} engine log decision --stage code-generation --checkpoint plan-approval`,
+          `bun ${entry} engine log answer --stage code-generation --checkpoint plan-approval`,
+        ]) {
+          const result = runHook(proj, BASH(command));
+          expect(result.code, `${command}\n${result.stderr}`).toBe(0);
+        }
+        for (const command of [
+          `bun ${entry} engine orchestrate report --stage code-generation --result completed`,
+          `bun ${entry} engine state advance`,
+          `bun ${entry} engine testing-posture begin --stage-level`,
+          `bun ${entry} engine log decision --stage code-generation --checkpoint summary-confirmation`,
+          `bun ${entry} engine log answer --stage code-generation --checkpoint plan-approval --checkpoint summary-confirmation`,
+          `bun ${entry} system lifecycle uninstall --yes`,
+          `bun ${entry} engine orchestrate next > src/inline.ts`,
+          `bun ${entry} engine orchestrate next; printf code > src/inline.ts`,
+          `bun ${entry} engine orchestrate next 2>&1; printf code > src/inline.ts`,
+          `bun ${entry} engine orchestrate next & printf code > src/inline.ts`,
+          String.raw`printf x\>&1`,
+          String.raw`printf x\<&0`,
+          String.raw`printf x \>& 1>&1 cp source src/inline.ts`,
+          `bun run ''2>&1 ${entry} engine orchestrate next`,
+          `bun run '' ${entry} engine orchestrate next`,
+          `bun --preload evil.ts ${entry} engine orchestrate next`,
+          `bun ${entry} engine orchestrate next --require=evil.ts`,
+          `./bun ${entry} engine orchestrate next`,
+          `PATH=. bun ${entry} engine orchestrate next`,
+          `env PATH=. bun ${entry} engine orchestrate next`,
+          `env -C other bun ${entry} engine orchestrate next`,
+          `env -Cother bun ${entry} engine orchestrate next`,
+          `env --chdir=other bun ${entry} engine orchestrate next`,
+          `sudo -D other bun ${entry} engine orchestrate next`,
+          `cd other && bun ${entry} engine orchestrate next`,
+          `env bun ${entry} engine orchestrate next`,
+          `command bun ${entry} engine orchestrate next`,
+          `printf next | xargs bun ${entry} engine orchestrate`,
+          "bun fake.ts .claude/tools/aidlc.ts engine orchestrate next",
+          "bun other/aidlc.ts engine orchestrate next",
+        ]) {
+          expect(runHook(proj, BASH(command)).code, command).toBe(2);
+        }
+        expect(runHook(proj, WRITE(join(proj, "src", "inline.ts"))).code).toBe(2);
+        expect(evaluateCodeGenerationApproval(proj, { unit: null }).ok).toBe(false);
+      } finally {
+        rmSync(proj, { recursive: true, force: true });
+      }
+    }, 30000);
+  }
+
+  test("planning through the Bun entry point requires a real installed file", () => {
+    const proj = scratchProject();
+    try {
+      seedState(proj);
+      const entry = join(proj, ".claude", "tools", "aidlc.ts");
+      const command = "bun .claude/tools/aidlc.ts engine orchestrate next";
+      expect(runHook(proj, BASH(command)).code).toBe(0);
+      rmSync(entry);
+      expect(runHook(proj, BASH(command)).code).toBe(2);
+      const other = join(proj, "other.ts");
+      writeFileSync(other, "// not the installed entry point\n");
+      symlinkSync(other, entry);
+      expect(runHook(proj, BASH(command)).code).toBe(2);
     } finally {
       rmSync(proj, { recursive: true, force: true });
     }
