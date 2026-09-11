@@ -4,7 +4,6 @@
 // covers: function:KNOWN_HARNESS_DIRS, hook:aidlc-rebuild-stage-graph
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -34,6 +33,7 @@ import {
   inspectSubagentInflight,
   subagentInflightMarkerPath,
   writeSessionBinding,
+  stateDigest,
 } from "../../dist/claude/.claude/tools/aidlc-lib.ts";
 import { writeActiveDirectiveMarker } from "../../core/tools/aidlc-lib.ts";
 
@@ -86,7 +86,7 @@ function seedUnapprovedCodeGeneration(root: string): void {
   writeActiveDirectiveMarker(root, {
     kind: "run-stage",
     stage: "code-generation",
-    state_sha256: createHash("sha256").update(state).digest("hex"),
+    state_sha256: stateDigest(state),
   });
 }
 
@@ -132,6 +132,8 @@ function copyCore(root: string, relativePath: string): void {
       "aidlc-settings.ts",
       "aidlc-install-paths.ts",
       "aidlc-distribution.ts",
+      "aidlc-channel.ts",
+      "aidlc-version.ts",
     ]) {
       copyFileSync(
         join(REPO_ROOT, "core", "tools", dependency),

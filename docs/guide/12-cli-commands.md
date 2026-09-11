@@ -32,7 +32,8 @@ diagnostic and lifecycle routes.
 | `/aidlc compose --report <path>` | Compose from a scan report (triage findings into a compact fix-and-ship run) |
 | `/aidlc --new-scope "<task>"` | Force the composer to synthesize a custom scope even when a stock scope matches |
 | `/aidlc` | Resume an existing workflow (if an intent exists) or creation the first intent and start new |
-| `/aidlc intent [name]` | List intents in the active space, or switch to an existing intent |
+| `/aidlc intent [name]` | List intents in the active space (`--all` includes archived), or switch to an existing intent |
+| `/aidlc intent archive <name>` | Retire an in-flight intent without deleting its record; `unarchive <name>` brings it back |
 | `/aidlc space [name]` | List spaces, or switch to an existing space |
 | `/aidlc space-create <name>` | Create a new space from the framework baseline |
 | `/aidlc knowledge <verb>` | Index and read your own documents (`onboard`, `sync`, `list`, `show`, `associate`, `dissociate`, `rebind`, `summarize`) |
@@ -57,6 +58,7 @@ diagnostic and lifecycle routes.
 | `/aidlc --depth <level>` | Override depth level (minimal, standard, comprehensive) |
 | `/aidlc --test-strategy <level>` | Override test strategy (minimal, standard, comprehensive) |
 | `/aidlc --review <class>` | Cap stage reviews for this run (adversarial, advisory, none) |
+| `/aidlc --change-control <value>` | Set what an input change after an approval does for this piece of work (strict, relaxed) |
 | `/aidlc config get <key>` | Print active workflow config (`depth`, `test-strategy`, `review`) |
 | `/aidlc config set <key> <value>` | Change active workflow config (`depth`, `test-strategy`, `review`) |
 | `/aidlc config list` | List active workflow config (`--json` for structured output) |
@@ -270,10 +272,32 @@ before changing state. See [Artifacts Reference](14-artifacts-reference.md).
 
 ### `/aidlc intent [name]` — List or switch intents
 
-Bare `/aidlc intent` lists the intents in the active space; add `--json` for
-structured output. `/aidlc intent <name>` switches the per-user active-intent
-cursor to an existing intent by unambiguous slug or full record-dir name. It
-never creates an intent or advances a workflow.
+Bare `/aidlc intent` lists the in-flight and completed intents in the active
+space; add `--json` for structured output (every row, archived included) and
+`--all` to show archived intents in the human listing. `/aidlc intent <name>`
+switches the per-user active-intent cursor to an existing intent by unambiguous
+slug or full record-dir name. It never creates an intent or advances a workflow.
+
+### `/aidlc intent archive <name>` — Retire an intent you will not finish
+
+`/aidlc intent archive <name> [--reason "<text>"]` moves an in-flight intent to
+the terminal `archived` status. Nothing is deleted: the record dir, its
+artifacts, and its audit shards stay exactly where they are, and the archive
+itself is recorded in that intent's audit trail as `WORKFLOW_ARCHIVED` (with
+your `--reason` when you give one). The registry row flips to `archived`, the
+state file's `Status` flips to `Archived`, and the default `/aidlc intent`
+listing hides the row. If the archived intent was the active one, the per-user
+cursor is cleared, so the next `/aidlc` asks which intent to work on (or creates
+new work when none is left) instead of resuming retired stages.
+
+Archiving is refused for a completed intent (already terminal), for an intent
+with Bolt worktrees still in flight, and for a team-owned intent with claimed
+Units, because those still have work running in other checkouts.
+
+`/aidlc intent unarchive <name>` reverses it: the row returns to `in-flight`,
+`Status` returns to `Running` at the stage it stopped on, and `WORKFLOW_UNARCHIVED`
+is recorded. It does not move the cursor; switch to the revived intent with
+`/aidlc intent <name>` when you want to continue it.
 
 ### `/aidlc space [name]` — List or switch spaces
 
@@ -380,7 +404,7 @@ Display current workflow progress without modifying anything.
 /aidlc --status
 ```
 
-**Behavior:** Reads the active intent's `aidlc-state.md` and displays: current phase, current stage, completed/total stage count, scope, depth, and the stage progress list. It also inspects completed-stage validation receipts and reports current, drifted, revalidation, untracked, or unavailable status; these findings are advisory and do not change routing. When the current stage is awaiting approval, status includes the organic gate-open timestamp and approximate pending duration. If no workflow is active, reports that no workflow is in progress.
+**Behavior:** Reads the active intent's `aidlc-state.md` and displays: current phase, current stage, completed/total stage count, scope, depth, the intent's Change Control value with where it came from (`Change Control: strict (from project.md)`, `relaxed (from scope classic)`, `strict (set by you)`, or `strict (not set)` for an older intent without the field), and the stage progress list. An invalid Change Control field is shown as unavailable with the validation error and the repair command. It also inspects completed-stage validation receipts and reports current, drifted, revalidation, untracked, or unavailable status; these findings are advisory and do not change routing. When the current stage is awaiting approval, status includes the organic gate-open timestamp and approximate pending duration. If no workflow is active, reports that no workflow is in progress.
 
 Under `Unit Ownership: team`, it appends a clearly labeled **Team Construction
 Snapshot** with the same board unscoped main renders: Unit Progress, locally
@@ -615,6 +639,7 @@ When a workflow has issues, `--doctor` also prints a **Workflow diagnosis** sect
 | Claude managed hook policy | On the Claude harness only, uses the existing managed-settings resolver (`AIDLC_MANAGED_SETTINGS_PATH`, current and legacy Windows paths, macOS, Linux/WSL) plus alphabetical `managed-settings.d/` fragments and fails when effective `allowManagedHooksOnly` is `true` |
 | Human-turn receipts | When stage/gate events exist but the audit has no `HUMAN_TURN`, reports a passing advisory that presence-gated checkpoints will refuse |
 | Hook drops | Surfaces any `.aidlc-hooks-health/<hook>.drops` telemetry - each records a failure a hook swallowed to avoid breaking your tool call - with the drop count and last timestamp per hook, and the remediation (inspect, then delete the file). Advisory - never fails |
+| Workspace source boundary binds | Only when workflow state exists: runs the same workspace source walk Plan Approval binds a plan to. Passes with the first 12 hex characters of the fingerprint; fails naming the reason code and path (for example `budget-entries at .`, `dangling-symlink at linked/src`, `excluded-path at node_modules/pkg`) with the repair text: shrink or exclude the offending path, declare real source under excluded directories in `.aidlc-source-paths.json`, remove the broken symlink, then re-run the fingerprint command; last resort, the human types `Override Plan Approval: <reason>` |
 | State drift | the active intent's `aidlc-state.md` matches the last `WORKFLOW_COMPLETED` in the audit |
 | Pending approval | When the current stage has waited at an organic approval gate for more than 24 hours, identifies it as waiting for a human rather than stuck and points to `/aidlc --status` (advisory - never fails) |
 | Background subagents | Reports fresh and stale session-scoped entries in `aidlc/.aidlc-subagent-inflight`. Fresh entries are advisory; stale or malformed entries fail with exact removal guidance. Silent when absent |
@@ -920,6 +945,48 @@ request at the next ordinal.
 
 ---
 
+### `/aidlc --change-control <value>` - Change Control for this piece of work
+
+Set the intent's Change Control value: what happens when something a human
+already approved or confirmed turns out to have changed underneath (source
+files moved after a code plan was approved, a reviewed document edited after
+its review, an output saved without the current summary confirmation).
+
+**Syntax:**
+
+```
+/aidlc --change-control strict
+/aidlc --change-control relaxed
+```
+
+**Behavior:** `strict` reopens the approval: the run stops with a plain
+sentence naming what changed and asks for the approval again. `relaxed` records
+the change once as a `CHANGE_ACCEPTED` audit row, tells you in one line, and
+continues. Neither value removes a gate: every approval question is still
+asked, and a reviewer's verdict is never changed. Runs
+`aidlc-utility.ts change-control <value>` behind the scenes, which rewrites
+the `Change Control` line in `aidlc-state.md` (so the value is committed with
+the intent, survives sessions, and teammates see it) and logs a
+`CHANGE_CONTROL_SET` audit event. The same command repairs an invalid line and
+records the old text. A plain-chat request ("stop asking me to re-approve when
+files change") runs the same command. An older intent without the line stays
+strict until this command sets it; a new intent starts from its scope's default.
+When a memory layer's `## Change Control` section says `Mode: strict`, the
+command refuses and names that file: edit the line there to change it for
+everyone. At creation the flag can be given with the scope (`/aidlc --scope poc
+--change-control strict "..."`).
+
+**Valid values:** `strict`, `relaxed`.
+
+**Examples:**
+
+```
+/aidlc --change-control relaxed        Record and announce input changes, keep going
+/aidlc --change-control strict         Approve again whenever an approved input changes
+```
+
+---
+
 ### `/aidlc --version` — Framework version
 
 Print the framework version (`aidlc <X.Y.Z>`) and exit. Read-only — works without a workflow and never prompts to resume one.
@@ -1153,7 +1220,7 @@ bun .claude/tools/aidlc-graph.ts ars --iae 0.30 --csu 0.80 --ve 0.40 --r 0.20 --
 
 ### `aidlc-graph validate-grid` - arbitrary-grid dependency check
 
-`bun .claude/tools/aidlc-graph.ts validate-grid --proposal <path> [--strict] [--project-type <t>] [--keywords <csv>]` validates an arbitrary `{"<stage>": "EXECUTE"|"SKIP"}` JSON grid. The proposal must name every compiled stage exactly once; missing stages, unknown stages, and invalid actions are errors. Lenient mode mirrors `validate-scope` (an off-path required producer is advisory); `--strict` hard-rejects it (the recompose posture). `--keywords` checks each granted keyword against the keywords existing scopes already claim: a collision is a hard error naming the incumbent scope (the composer runs this before writing gate-granted keywords). The result also carries `nearest_stock`: every graph/plugin-authored stock scope ranked by grid distance from the proposal (`{scope, diff, differs}`, ascending), with composer-authored scope entries excluded and missing or extra keys counted as differences. For front/report composition, the matched-vs-custom decision routes solely on this final proposal result (`diff <= 2` plus compatible depth), not a model recount or the earlier mechanical ARS screen. In-flight recomposition treats the ranking as advisory and preserves the running scope and plan. Exit 1 iff invalid; the JSON result lands on stdout.
+`bun .claude/tools/aidlc-graph.ts validate-grid --proposal <path> [--strict] [--project-type <t>] [--keywords <csv>] [--change-control <strict|relaxed>]` validates an arbitrary `{"<stage>": "EXECUTE"|"SKIP"}` JSON grid. The proposal must name every compiled stage exactly once; missing stages, unknown stages, and invalid actions are errors. Lenient mode mirrors `validate-scope` (an off-path required producer is advisory); `--strict` hard-rejects it (the recompose posture). `--keywords` checks each granted keyword against the keywords existing scopes already claim: a collision is a hard error naming the incumbent scope (the composer runs this before writing gate-granted keywords). `--change-control` (or a `changeControl` member beside `stages`) checks the composer's proposed Change Control value: anything but `strict` or `relaxed` is an error, a `relaxed` proposal under a memory layer's `Mode: strict` is refused naming that file, and the accepted value is echoed as `change_control`. The result also carries `nearest_stock`: every graph/plugin-authored stock scope ranked by grid distance from the proposal (`{scope, diff, differs}` ascending, composer-authored scopes excluded), so the composer's matched-vs-custom verdict is the validator's number rather than an LLM recount.
 
 ### `aidlc-sensor` — inspect and fire Sensors
 
@@ -1201,6 +1268,32 @@ bun .claude/tools/aidlc-runtime.ts read requirements-analysis
 ```
 
 `runtime-graph.json` is gitignored. See [Artifacts Reference](14-artifacts-reference.md) for the artifact's shape and the [Runtime Graph](../reference/13-runtime-graph.md) reference chapter for the full schema.
+
+### `aidlc attest` — commit provenance
+
+Answers "which reviewed unit of work owns this commit's changes, and does the committed content still match what the reviewer approved?" Attribution is derived purely from committed content — the review receipts in the `audit/` shards plus the committed `reviewed-source-*.tsv` evidence files, read out of a git tree rather than your checkout — so it works on plain manual `git commit`s, in any clone, with no hooks, no commit-message trailers, and no pushed refs, and the same commit always resolves the same way.
+
+| Subcommand | What it does |
+|------------|--------------|
+| `resolve [<commit>]` | Read-only. Attribute the commit's first-parent delta (default `HEAD`) to reviewed units and classify each changed path: `verified` (committed content equals the reviewed content), `drifted` (reviewed but edited since), `unattested` (no unit claims it), `unverifiable` (evidence missing, tampered, or only in the gitignored local snapshot — fails closed), `indeterminate` (ambiguous receipts — fails closed), `excluded` (framework shell/record paths — harness shells already established in the range's base tree, not manifests introduced by the change or shells installed only in your checkout). JSON report on stdout. `--commit <rev>` is accepted as a flag form of the positional |
+| `resolve --diff <base>..<head>` | Same classification over an arbitrary range (`...` uses the merge-base, matching merge-request semantics) |
+| `resolve … --fail-on drifted,unattested,unverifiable,indeterminate` | Exit 3 when any path matches one of the named statuses — the gate form. Accepts any subset of the four; **name all four unless you mean to let unverified paths through** — omitting `unverifiable` passes paths whose reviewed content nothing could check |
+| `resolve … --record-ref <ref>` | Read receipts and evidence from `<ref>`'s tree instead of the commit under test. Point it at a ref the change cannot write (a protected branch, a records-only ref) so a change cannot supply its own approvals |
+| `resolve … --require-trust <level>` | Exit 3 unless the report's own basis reaches `informational` \| `reproducible` \| `independent` \| `signed` (`signed` means every input the verdict rests on — each relied-upon receipt's audit shard as well as the evidence file it selects — arrived in a signed commit). Every report carries a `trust` object saying which it achieved and why |
+| `anchor [--commit <rev>]` | Append a `SOURCE_COMMITTED` audit row recording that the commit landed reviewed claims. Enrichment only — `resolve` never reads anchors, so unanchored manual commits lose nothing. Explicit by default; set `AIDLC_SESSION_ANCHOR=1` to also sweep recent commits at session start |
+| `anchor --reconcile [--max-commits <n>]` | Sweep first-parent history (default 100 commits) and backfill anchors for attributable commits; already-anchored and swarm-merged commits are skipped, unattributable ones reported |
+
+```
+# Gate a branch: three-dot (merge-base) range, all four failable statuses,
+# receipts read from a ref the branch cannot write
+bun .claude/tools/aidlc-attest.ts resolve --diff origin/main...HEAD \
+  --record-ref origin/aidlc-records --require-trust independent \
+  --fail-on drifted,unattested,unverifiable,indeterminate
+```
+
+Three details make or break that recipe. Use `...` (three dots): `origin/main..HEAD` diffs the *tips*, so anything that landed on `origin/main` after the branch point shows up as a change of this branch and false-fails. Fetch enough history — a shallow checkout (`actions/checkout` defaults to depth 1) has no parent commit for the boundary, which `resolve` reports as an error rather than silently classifying the whole tree; set `fetch-depth: 0`. And decide deliberately whether you are *reporting* or *enforcing*: without `--record-ref`, a change that writes its own receipts can verify itself, which the report states (`trust.level: reproducible`) but does not prevent. Drop both trust flags and you get an honest informational report.
+
+Both verbs accept `--repo <name>` (multi-repo intents), `--space <name>`, and `--intent <dir>`; each verb rejects the other's flags rather than ignoring them. See the [Commit Provenance](../reference/20-commit-provenance.md) reference chapter for the threat model, the trust ladder, and status semantics.
 
 ### Session skills — report on a workflow
 
