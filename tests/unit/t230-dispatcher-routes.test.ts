@@ -1920,6 +1920,7 @@ describe("t230 dispatcher route completeness", () => {
 
   test("every main-exported tool is reachable from a route", () => {
     const mainExportedTools = [
+      "aidlc-attest.ts",
       "aidlc-audit.ts",
       "aidlc-bolt.ts",
       "aidlc-graph.ts",

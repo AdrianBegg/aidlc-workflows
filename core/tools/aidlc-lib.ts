@@ -208,8 +208,28 @@ export const KNOWN_HARNESS_DIRS = [".claude", ".kiro", ".codex", ".aidlc", ".cur
 // / ".kiro" / ".gemini". Guards the script-path derivation so an unexpected
 // layout (lib copied loose in a test, a non-dotted parent) falls through to the
 // CWD probe instead of returning a bogus harness dir.
-function isHarnessDirName(name: string): boolean {
+export function isHarnessDirName(name: string): boolean {
   return /^\.[a-z0-9][a-z0-9._-]*$/i.test(name);
+}
+
+/** Where a harness shell announces itself, relative to the shell dir. */
+export const HARNESS_SHELL_MANIFEST_REL = "tools/data/harness.json";
+
+/** The manifest test that makes a dot-dir a harness shell rather than an
+ *  ordinary hidden directory someone reviewed. Exported alongside
+ *  HARNESS_SHELL_MANIFEST_REL so a caller that must judge a *git tree* instead
+ *  of the checkout (commit provenance) applies the identical rule: two answers
+ *  to "is this a shell?" would mean two answers to "is this path excluded?". */
+export function isHarnessShellManifest(bytes: Buffer | string): boolean {
+  if (bytes.length > 64 * 1024) return false;
+  try {
+    const parsed = JSON.parse(
+      typeof bytes === "string" ? bytes : bytes.toString("utf-8"),
+    ) as { name?: unknown };
+    return typeof parsed.name === "string" && parsed.name.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function deriveHarnessDir(): string {
@@ -9299,6 +9319,29 @@ export interface AuditShardEvent {
 // can preserve append order only within one shard; equal second-precision
 // timestamps across shards are causally unordered and must not be resolved by
 // filename position when authority or attempt freshness depends on the result.
+// Split ONE shard's bytes into events, preserving append position. Factored out
+// of readAuditShardEvents so a reader whose shard bytes do not come from the
+// working tree shares this parser rather than reimplementing the block grammar:
+// aidlc-attest.ts reads shards out of a git tree (`git cat-file`) to resolve a
+// commit against the record as that commit carried it. Two copies of the
+// `\n---\n` split and the Event/Timestamp filter would be free to drift, and a
+// drifted audit parser silently changes which receipt counts as newest.
+export function parseAuditShardEvents(
+  content: string,
+  shard: string,
+  shardIndex: number,
+): AuditShardEvent[] {
+  const rows: AuditShardEvent[] = [];
+  const blocks = content.replace(/\r\n/g, "\n").split(/\n---\n/);
+  for (let pos = 0; pos < blocks.length; pos++) {
+    const event = auditBlockField(blocks[pos], "Event");
+    const timestamp = auditBlockField(blocks[pos], "Timestamp");
+    if (!event || !timestamp) continue;
+    rows.push({ block: blocks[pos], event, pos, shard, shardIndex, timestamp });
+  }
+  return rows;
+}
+
 export function readAuditShardEvents(
   projectDir: string,
   intent?: string,
@@ -9327,20 +9370,7 @@ export function readAuditShardEvents(
       unreadableShards?.push(shards[shardIndex]);
       continue; // vanished or refused shard; growth during read is tolerated
     }
-    const blocks = content.replace(/\r\n/g, "\n").split(/\n---\n/);
-    for (let pos = 0; pos < blocks.length; pos++) {
-      const event = auditBlockField(blocks[pos], "Event");
-      const timestamp = auditBlockField(blocks[pos], "Timestamp");
-      if (!event || !timestamp) continue;
-      rows.push({
-        block: blocks[pos],
-        event,
-        pos,
-        shard: shards[shardIndex],
-        shardIndex,
-        timestamp,
-      });
-    }
+    rows.push(...parseAuditShardEvents(content, shards[shardIndex], shardIndex));
   }
   return rows;
 }
@@ -14687,13 +14717,14 @@ function sourceIdentityBudget(name: string, fallback: number): number {
 function isSourceHarnessShellDir(root: string, name: string): boolean {
   if (!isHarnessDirName(name)) return false;
   try {
-    const manifestPath = join(root, name, "tools", "data", "harness.json");
+    const manifestPath = join(
+      root,
+      name,
+      ...HARNESS_SHELL_MANIFEST_REL.split("/"),
+    );
     const stat = lstatSync(manifestPath);
     if (!stat.isFile() || stat.size > 64 * 1024) return false;
-    const parsed = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
-      name?: unknown;
-    };
-    return typeof parsed.name === "string" && parsed.name.trim().length > 0;
+    return isHarnessShellManifest(readFileSync(manifestPath, "utf-8"));
   } catch {
     return false;
   }
@@ -16768,7 +16799,7 @@ export function sourceListingSha256(serialized: string): string {
   return createHash("sha256").update(serialized, "utf-8").digest("hex");
 }
 
-function normalizeManifestSourcePath(path: string): { path: string; prefix: boolean } | { reason: string } {
+export function normalizeManifestSourcePath(path: string): { path: string; prefix: boolean } | { reason: string } {
   if (path.length === 0) return { reason: "writes[].path must be non-empty" };
   if (path.includes("\0")) return { reason: "writes[].path cannot contain a NUL byte" };
   if (path.includes("\\")) return { reason: "writes[].path must use POSIX '/' separators, not backslashes" };
@@ -16784,13 +16815,27 @@ function normalizeManifestSourcePath(path: string): { path: string; prefix: bool
   return { path: `${segments.join("/")}${prefix ? "/" : ""}`, prefix };
 }
 
-function sourcePathIsExcluded(
+export interface SourceExclusionContext {
+  /** Harness shell dirs of the tree being judged, supplied instead of being
+   *  discovered under `projectDir`. Commit provenance passes this: shells found
+   *  on disk would make a commit's `excluded` paths depend on which harnesses
+   *  happen to be installed in the current checkout, so the same SHA would
+   *  classify `.claude/settings.json` differently in two clones. */
+  harnessShellDirs: ReadonlySet<string>;
+}
+
+export function sourcePathIsExcluded(
   path: string,
   carriesWorkspaceShell: boolean,
   projectDir?: string,
+  context?: SourceExclusionContext,
 ): boolean {
   const withoutTrailingSlash = path.replace(/\/+$/, "");
   const segments = withoutTrailingSlash.split("/");
+  const isShellDir = (name: string): boolean =>
+    context !== undefined
+      ? isHarnessDirName(name) && context.harnessShellDirs.has(name)
+      : projectDir !== undefined && isSourceHarnessShellDir(projectDir, name);
   if (
     carriesWorkspaceShell &&
     (
@@ -16798,10 +16843,7 @@ function sourcePathIsExcluded(
       path === ".aidlc/" ||
       path.startsWith("aidlc/") ||
       path.startsWith(".aidlc/") ||
-      (
-        projectDir !== undefined &&
-        isSourceHarnessShellDir(projectDir, segments[0])
-      )
+      isShellDir(segments[0])
     )
   ) return true;
 
@@ -17718,6 +17760,20 @@ export function unitSourceFingerprint(
   return `sha256:${sourceListingSha256(serializeUnitSourceListing(listing, claimModel, manifestSha256))}`;
 }
 
+/** Parse committed reviewed-source evidence bytes (the serializeUnitSourceListing
+ *  shape): a `manifest\t<sha256>\t-` header row binding the source-manifest bytes,
+ *  then the claim-restricted per-path listing. Null on any malformed row. */
+export function parseUnitSourceListing(
+  serialized: string,
+): { manifestSha256: string; listing: WorkspaceSourceListing } | null {
+  const newline = serialized.indexOf("\n");
+  if (newline === -1) return null;
+  const header = /^manifest\t([0-9a-f]{64})\t-$/.exec(serialized.slice(0, newline));
+  if (header === null) return null;
+  const listing = parseSourceListing(serialized.slice(newline + 1));
+  return listing === null ? null : { manifestSha256: header[1], listing };
+}
+
 function validSourceSnapshotFingerprint(fingerprint: string): string | null {
   const matched = /^sha256:([0-9a-f]{64})$/.exec(fingerprint);
   return matched?.[1] ?? null;
@@ -17801,6 +17857,40 @@ export function sourceBaselineAuditFields(
   };
 }
 
+/** Record-relative, posix-separated location of a unit's stage record files. One
+ *  grammar for both readers: the filesystem readers join it onto a record dir,
+ *  and the git-tree reader in aidlc-attest.ts appends it to a tree path, so a
+ *  layout change cannot move one reader without moving the other. */
+export function unitStageRecordRelPath(
+  unit: string,
+  stageSlug: string,
+  fileName: string,
+): string {
+  return `construction/${unit}/${stageSlug}/${fileName}`;
+}
+
+/** Record-relative path of a unit's committed reviewed-listing evidence. */
+export function reviewedSourceEvidenceRelPath(
+  unit: string,
+  stageSlug: string,
+  hash12: string,
+): string {
+  return unitStageRecordRelPath(unit, stageSlug, `reviewed-source-${hash12}.tsv`);
+}
+
+/** Committed per-unit reviewed-listing evidence beside source-manifest.json. */
+export function reviewedSourceEvidencePath(
+  recordDirPath: string,
+  unit: string,
+  stageSlug: string,
+  hash12: string,
+): string {
+  return join(
+    recordDirPath,
+    ...reviewedSourceEvidenceRelPath(unit, stageSlug, hash12).split("/"),
+  );
+}
+
 /** Write a content-addressed unit listing snapshot including its manifest header. */
 export function writeUnitSourceSnapshot(
   projectDir: string,
@@ -17811,10 +17901,20 @@ export function writeUnitSourceSnapshot(
   manifestSha256: string,
 ): string {
   const dir = sourceSnapshotDir(projectDir, stageSlug);
+  const record = recordDir(projectDir);
   const unitError = validateUnitName(unit);
-  if (dir === null || unitError !== null) throw new Error("Cannot write unit source snapshot without a valid active record, stage slug, and unit");
+  if (dir === null || record === null || unitError !== null) throw new Error("Cannot write unit source snapshot without a valid active record, stage slug, and unit");
   const serialized = serializeUnitSourceListing(listing, claimModel, manifestSha256);
   const hash = sourceListingSha256(serialized);
+  // Dual-write the identical bytes into the COMMITTED record beside the unit's
+  // source-manifest.json. The receipt's Unit Source Fingerprint is the sha256
+  // of exactly these bytes, so the committed audit shards already tamper-bind
+  // this file; a bare clone/CI checkout can resolve per-path reviewed OIDs
+  // (aidlc-attest.ts) without the machine-local .aidlc-source-review/ copy.
+  writeSourceSnapshot(
+    reviewedSourceEvidencePath(record, unit, stageSlug, hash.slice(0, 12)),
+    serialized,
+  );
   return writeSourceSnapshot(join(dir, `unit-${unit}-${hash.slice(0, 12)}.tsv`), serialized);
 }
 
@@ -18044,6 +18144,7 @@ export function currentStageSourceBaseline(
 export interface UnitSourceSnapshot {
   listing: WorkspaceSourceListing;
   manifestSha256: string;
+  serialized: string;
 }
 
 /** Read a unit snapshot only after full-hash verification and strict parsing. */
@@ -18063,7 +18164,9 @@ export function readUnitSourceSnapshot(
   const header = /^manifest\t([0-9a-f]{64})\t-$/.exec(serialized.slice(0, newline));
   if (header === null) return null;
   const listing = parseSourceListing(serialized.slice(newline + 1));
-  return listing === null ? null : { listing, manifestSha256: header[1] };
+  return listing === null
+    ? null
+    : { listing, manifestSha256: header[1], serialized };
 }
 
 
